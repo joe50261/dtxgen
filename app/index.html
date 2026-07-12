@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dtxgen web — 音檔 → DTX 譜包(純前端)</title>
+<style>
+:root{--bg:#0f1117;--card:#171a23;--card2:#1d2130;--tx:#dde3ee;--dim:#8b93a7;--acc:#5eead4;--acc2:#818cf8;--good:#34d399;--bad:#f87171;--line:#2a2f42}
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:clamp(14px,1.1vw + 9px,17px)}
+body{background:var(--bg);color:var(--tx);font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;line-height:1.6;min-height:100vh}
+.wrap{max-width:46rem;margin:0 auto;padding:2rem clamp(.9rem,4vw,2rem) 4rem}
+h1{font-size:1.5rem}
+.sub{color:var(--dim);font-size:.9rem;margin:.3rem 0 1.6rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:1rem;padding:1.2rem;margin-bottom:1rem}
+label{display:block;color:var(--dim);font-size:.85rem;margin:.7rem 0 .25rem}
+input[type=text]{width:100%;background:#0b0d13;border:1px solid var(--line);border-radius:.6rem;color:var(--tx);padding:.65rem .8rem;font-size:1rem;font-family:inherit}
+input[type=text]:focus{outline:none;border-color:var(--acc)}
+.drop{border:2px dashed var(--line);border-radius:.8rem;padding:1.6rem;text-align:center;color:var(--dim);cursor:pointer;transition:.2s}
+.drop.on{border-color:var(--acc);color:var(--acc)}
+button{background:var(--acc);color:#04252a;border:none;border-radius:.7rem;padding:.7rem 1.4rem;font-size:1rem;font-weight:700;cursor:pointer;font-family:inherit;margin-top:1rem}
+button:disabled{opacity:.45;cursor:default}
+.chk{display:flex;align-items:center;gap:.5rem;color:var(--dim);font-size:.88rem;margin-top:.6rem}
+.chk input{accent-color:var(--acc)}
+.bar{height:.5rem;background:#0b0d13;border-radius:.3rem;overflow:hidden;margin-top:.6rem}
+.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--acc2),var(--acc));border-radius:.3rem;transition:width .5s}
+.st{color:var(--dim);font-size:.85rem;margin-top:.5rem}
+.meta{color:var(--dim);font-size:.8rem}
+.err{color:var(--bad);font-size:.85rem;word-break:break-all;margin-top:.5rem}
+.dl a{display:inline-block;background:var(--good);color:#03271a;text-decoration:none;border-radius:.6rem;padding:.6rem 1.2rem;font-weight:700;margin-top:.8rem}
+.ghostbtn{background:var(--card2);color:var(--tx);border:1px solid var(--line);border-radius:.5rem;padding:.15rem .7rem;font-size:.78rem;cursor:pointer;margin-top:0;font-weight:400}
+footer{color:var(--dim);font-size:.78rem;margin-top:2.5rem;border-top:1px solid var(--line);padding-top:.9rem}
+</style></head><body><div class="wrap">
+<h1>dtxgen <span style="color:var(--acc)">web</span></h1>
+<div class="sub">音檔 → DTXMania 譜包 — <b>純前端</b>:所有運算在你的瀏覽器內完成,檔案不離開這台電腦。支援丟回舊譜包 zip 回爐重做(直接用包內無損鼓原軌,跳過分離)。</div>
+
+<div class="card">
+  <div class="drop" id="drop">拖放或點擊選擇 — 音檔(mp3 / ogg / wav / m4a / flac)或譜包 zip 回爐</div>
+  <input type="file" id="file" accept="audio/*,.mp3,.ogg,.wav,.m4a,.flac,.zip" style="display:none">
+  <label>曲名(可留空:自動用檔名 / 譜包內曲名)</label>
+  <input type="text" id="title">
+  <div style="display:flex;gap:1rem;flex-wrap:wrap">
+    <div><label>BPM 提示(可留空)</label>
+    <input type="text" id="bpm" placeholder="例:176" inputmode="decimal" style="max-width:9rem"></div>
+  </div>
+  <div class="chk"><input type="checkbox" id="stem"><span>輸入已是純鼓軌(跳過分離,快很多)</span></div>
+  <button id="go" disabled>開始製譜</button>
+  <div class="bar" id="barbox" style="display:none"><i id="bar"></i></div>
+  <div class="st" id="stage"></div>
+  <div class="err" id="err"></div>
+  <div class="dl" id="dl"></div>
+</div>
+
+<details class="card" id="logbox">
+  <summary style="cursor:pointer;color:var(--dim)">執行紀錄(log)
+    <button id="dlLog" class="ghostbtn" style="margin-left:.8rem">下載 log</button>
+    <button id="clearLog" class="ghostbtn">清空</button>
+  </summary>
+  <pre id="log" style="margin-top:.6rem;max-height:20rem;overflow:auto;font-size:.74rem;line-height:1.5;color:var(--dim);white-space:pre-wrap;word-break:break-all"></pre>
+</details>
+
+<footer>dtxgen web · demucs + ADTOF(ONNX Runtime Web,WebGPU/WASM)· 難度簡化學自 28 首真實譜包 · 首次載入分離模型 97MB(之後由瀏覽器快取)</footer>
+</div>
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/libflac.min.wasm.js"></script>
+<script type="module" src="js/main.js"></script>
+</body></html>
