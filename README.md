@@ -34,11 +34,15 @@ GITHUB_TOKEN 無法代辦)。
 
 | 路徑 | 來源 | 版控 |
 |---|---|---|
-| `app/models/htdemucs.onnx`(174MB) | npm `demucs` | ✗(同步) |
+| `app/models/htdemucs.onnx.*`(174MB,24MiB 分塊+manifest) | npm `demucs` | ✗(同步) |
 | `app/vendor/demucs/` | npm `demucs` dist(import 已改寫) | ✗(同步) |
-| `app/vendor/ort/` | npm `onnxruntime-web` dist | ✗(同步) |
+| `app/vendor/ort/`(jsep.wasm 為 24MiB 分塊) | npm `onnxruntime-web` dist | ✗(同步) |
 | `app/vendor/jszip.min.js`、`libflac.min.wasm.*` | 手工 vendor | ✓ |
 | `app/models/` 其餘小模型(ADTOF/GBDT/濾波器組) | 訓練產物 | ✓ |
+
+超過 25MiB 的大檔(`htdemucs.onnx`、ort 的 `jsep.wasm`)同步時切成
+24MiB 分塊 + manifest — 靜態主機有單檔上限(如 Cloudflare Pages 25MiB),
+整檔無法部署;worker 於執行期依 manifest 抓回拼裝(`app/js/worker.js`)。
 
 第三方元件授權(含 htdemucs 權重「僅限個人/研究用途」之注意事項)見
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
