@@ -15,10 +15,12 @@ python3 -m http.server 8080     # 或:npx serve
 
 也可整個資料夾部署到 GitHub Pages / 任何靜態空間。
 
-WASM 多執行緒需要 crossOriginIsolated(COOP/COEP header)— 靜態主機設不了
-header,由 `coi-serviceworker.min.js`(Service Worker)於執行期注入:首次
-載入會自動重整一次頁面以套用;之後 `crossOriginIsolated` 為 true,ort 以多
-線程跑。SW 不可用時(如 Firefox 隱私視窗)自動退回單線程,功能不受影響。
+WASM 多執行緒需要 crossOriginIsolated(COOP/COEP header)。Cloudflare Pages
+由 `_headers` 原生下發(首載即隔離、免重整);GitHub Pages 等設不了 header
+的主機由 `coi-serviceworker.min.js`(Service Worker)於執行期注入:首次
+載入會自動重整一次頁面以套用(有原生 header 時 SW 不會註冊)。之後
+`crossOriginIsolated` 為 true,ort 以多線程跑。兩者皆不可用時(如 Firefox
+隱私視窗開本機 http.server)自動退回單線程,功能不受影響。
 
 注意:本機開發時 SW 註冊在整個 `localhost:8080` origin 且**跨專案殘留** —
 之後在同一 port 服務別的專案,回應仍會被注入 COOP/COEP(跨來源 iframe/

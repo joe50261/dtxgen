@@ -23,6 +23,13 @@ check('coi-serviceworker 在 app 根目錄且會注入 COOP/COEP',
   sw.includes('Cross-Origin-Embedder-Policy') && sw.includes('Cross-Origin-Opener-Policy'),
   `${(sw.length / 1024).toFixed(1)} KB`);
 
+// Cloudflare Pages 走 _headers 原生下發(首載即隔離、免 SW 重整)
+const cfHeaders = readFileSync(new URL('_headers', app), 'utf8');
+check('_headers(Cloudflare Pages)對全站宣告 COOP/COEP',
+  /^\/\*$/m.test(cfHeaders) &&
+  /Cross-Origin-Opener-Policy: same-origin/.test(cfHeaders) &&
+  /Cross-Origin-Embedder-Policy: require-corp/.test(cfHeaders));
+
 // 以「字元位置」比先後:config(inline)→ SW 腳本 → 其他外部腳本
 const posCfg = html.search(/<script>[^<]*coepCredentialless: \(\) => false/);
 const posCoi = html.search(/<script src="coi-serviceworker\.min\.js">/);
