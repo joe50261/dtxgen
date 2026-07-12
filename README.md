@@ -19,9 +19,13 @@ npm test               # 冒煙測試(node)
 ## 部署(GitHub Pages)
 
 push 到 `main` 即自動部署:[`deploy-pages.yml`](.github/workflows/deploy-pages.yml)
-會 `npm ci` → 同步 vendor 資產 → 跑測試 → 把 `app/` 整包發佈到 Pages。
-首次執行會自動啟用 Pages(build type = GitHub Actions),不需手動到 Settings 設定;
+會 `npm ci` → 同步 vendor 資產 → 跑測試 → 把 `app/` 整包發佈到 Pages;
 也可在 Actions 頁面手動觸發(workflow_dispatch)。
+
+**首次(一次性)**:若 workflow 在 configure-pages 步驟報
+「Get Pages site failed」,到 Settings → Pages 把 Source 設為
+「GitHub Actions」再重跑即可(啟用站台需 admin 權限,workflow 的
+GITHUB_TOKEN 無法代辦)。
 
 ## 版控範圍
 
@@ -35,3 +39,6 @@ push 到 `main` 即自動部署:[`deploy-pages.yml`](.github/workflows/deploy-pa
 | `app/vendor/ort/` | npm `onnxruntime-web` dist | ✗(同步) |
 | `app/vendor/jszip.min.js`、`libflac.min.wasm.*` | 手工 vendor | ✓ |
 | `app/models/` 其餘小模型(ADTOF/GBDT/濾波器組) | 訓練產物 | ✓ |
+
+第三方元件授權(含 htdemucs 權重「僅限個人/研究用途」之注意事項)見
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
