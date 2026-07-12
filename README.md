@@ -38,6 +38,7 @@ GITHUB_TOKEN 無法代辦)。
 | `app/vendor/demucs/` | npm `demucs` dist(import 已改寫) | ✗(同步) |
 | `app/vendor/ort/`(jsep.wasm 為 24MiB 分塊) | npm `onnxruntime-web` dist | ✗(同步) |
 | `app/vendor/jszip.min.js`、`libflac.min.wasm.*` | 手工 vendor | ✓ |
+| `app/coi-serviceworker.min.js`(COOP/COEP 注入,啟用 WASM 多線程) | 手工 vendor | ✓ |
 | `app/models/` 其餘小模型(ADTOF/GBDT/濾波器組) | 訓練產物 | ✓ |
 
 超過 25MiB 的大檔(`htdemucs.onnx`、ort 的 `jsep.wasm`)同步時切成

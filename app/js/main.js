@@ -31,7 +31,8 @@ window.addEventListener('error', ev =>
 window.addEventListener('unhandledrejection', ev =>
   log('error', `未處理的 Promise 拒絕:${ev.reason?.stack || ev.reason}`));
 log('info', `dtxgen web 啟動 — UA: ${navigator.userAgent}`);
-log('info', `WebGPU: ${'gpu' in navigator ? '可用' : '不可用(分離將走 WASM,較慢)'} · 核心數: ${navigator.hardwareConcurrency || '?'}`);
+log('info', `WebGPU: ${'gpu' in navigator ? '可用' : '不可用(分離將走 WASM,較慢)'} · 核心數: ${navigator.hardwareConcurrency || '?'}` +
+    ` · crossOriginIsolated: ${self.crossOriginIsolated ? '✓(WASM 多線程)' : '✗(WASM 單線程;首次載入應會自動重整套用)'}`);
 
 // 曲名消毒:任何來源(手填/檔名/譜包 #TITLE/metadata)統一過濾 —
 // 含 / 的曲名會讓 zip.folder 建出巢狀層級(打包層級錯誤的根源)

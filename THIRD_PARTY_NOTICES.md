@@ -11,6 +11,14 @@ JSZip v3.10.1,(c) 2009-2016 Stuart Knightley,雙授權 MIT 或 GPLv3
 (本專案依 MIT 使用)。檔頭保留原始授權聲明。內含 pako(MIT)。
 <https://github.com/Stuk/jszip>
 
+### coi-serviceworker — `app/coi-serviceworker.min.js`
+
+coi-serviceworker v0.1.7,(c) Guido Zuidhof and contributors,MIT License —
+以 Service Worker 注入 COOP/COEP header,讓無法自訂回應 header 的靜態主機
+(如 GitHub Pages)也能 crossOriginIsolated(WASM 多執行緒所需)。
+檔頭保留原始授權聲明。
+<https://github.com/gzuidhof/coi-serviceworker>
+
 ### libflac.js — `app/vendor/libflac.min.wasm.js` / `.wasm`
 
 libflac.js(<https://github.com/mmig/libflac.js>),MIT License —
