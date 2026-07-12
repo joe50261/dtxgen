@@ -38,18 +38,28 @@ for (const f of ['apply.js', 'dsp.js', 'wav-utils.js', 'onnx-htdemucs.js']) {
 console.log('✓ demucs dist(4 檔,onnx-htdemucs.js 已改寫 import)→ app/vendor/demucs/');
 
 // onnxruntime-web runtime
+// 注意:onnxruntime-web 的 exports 不含 ./package.json(require.resolve 會
+// ERR_PACKAGE_PATH_NOT_EXPORTED),故 fallback 直接找 node_modules 路徑
 let ortDir;
 try {
   ortDir = join(dirname(require.resolve('onnxruntime-web/package.json')), 'dist');
 } catch {
-  ortDir = null;
+  const cand = join(root, 'node_modules/onnxruntime-web/dist');
+  ortDir = existsSync(cand) ? cand : null;
 }
+const ortFiles = ['ort.min.mjs', 'ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs',
+                  'ort-wasm-simd-threaded.jsep.wasm', 'ort-wasm-simd-threaded.jsep.mjs'];
 if (ortDir) {
-  for (const f of ['ort.min.mjs', 'ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs',
-                   'ort-wasm-simd-threaded.jsep.wasm', 'ort-wasm-simd-threaded.jsep.mjs']) {
+  for (const f of ortFiles) {
     const src = join(ortDir, f);
     if (existsSync(src)) copyFileSync(src, join(root, 'app/vendor/ort', f));
   }
   console.log('✓ onnxruntime-web runtime → app/vendor/ort/');
+}
+// 站台完整性:ort runtime 缺檔即為壞站(app/vendor/ort 不進版控,只能靠同步)
+const missing = ortFiles.filter(f => !existsSync(join(root, 'app/vendor/ort', f)));
+if (missing.length) {
+  console.error(`✗ ort runtime 缺檔:${missing.join(' ')} — onnxruntime-web 未安裝?`);
+  process.exit(1);
 }
 console.log('vendor 同步完成');
