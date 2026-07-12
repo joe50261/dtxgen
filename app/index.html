@@ -41,6 +41,8 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2.5rem;border-top:1px solid 
   <div style="display:flex;gap:1rem;flex-wrap:wrap">
     <div><label>BPM 提示(可留空)</label>
     <input type="text" id="bpm" placeholder="例:176" inputmode="decimal" style="max-width:9rem"></div>
+    <div><label>跳過開頭秒數(可留空)</label>
+    <input type="text" id="start" placeholder="例:33" inputmode="decimal" style="max-width:9rem"></div>
   </div>
   <div class="chk"><input type="checkbox" id="stem"><span>輸入已是純鼓軌(跳過分離,快很多)</span></div>
   <button id="go" disabled>開始製譜</button>
