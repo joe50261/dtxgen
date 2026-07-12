@@ -30,11 +30,18 @@ unregister,或換一個 port。
 ## 使用
 
 拖入音檔(mp3/ogg/wav/m4a/flac)→ 開始製譜 → 自動下載譜包 zip。
-- 譜包內含無損鼓原軌(dtxgen_drums.flac)— 把譜包 zip 拖回來即「回爐重做」:
-  直接從鼓原軌起跑,零音質損失、跳過分離,數十秒完成
+- 譜包內含鼓原軌(dtxgen_drums.opus,Ogg/Opus 192kbps;無 WebCodecs 的瀏覽器
+  退 FLAC)— 把譜包 zip 拖回來即「回爐重做」:直接從鼓原軌起跑、跳過分離,
+  數十秒完成。回爐時鼓原軌原封沿用、不重編(零世代損失;設「跳過開頭秒數」
+  或舊譜包的 dtxgen_drums.flac / .wav 才重編一次)
 - keysound 現作:各鼓件的擊打音(ks_*.wav)切自該曲鼓軌 — 選孤立度最大、
   能量達標的一擊,fade + 峰值 -3dB 正規化;不是罐頭音色
+- BGM 自動去鼓:完整混音輸入時,BGM 以分離出的伴奏(bass/other/vocals 相加)
+  重編為 Ogg/Opus 192kbps — 鼓聲只由你打出的 keysound 發出,不與 BGM 疊音
+  (無 WebCodecs 的瀏覽器退 16-bit WAV;純鼓軌/回爐路徑沿用來源 BGM)
 - 「純鼓軌」勾選:輸入已是鼓軌時跳過分離
+- 「跳過開頭秒數」= 原 YouTube 網址的 `t=` 參數:譜面與 BGM 都從該秒起算
+  (BGM 裁切後重編:有損來源 → Ogg/Opus 192kbps,wav/flac 來源 → FLAC)
 - 完整混音的分離在 Chrome/Edge 走 WebGPU(M 系列很快);其他瀏覽器 WASM 較慢
 - 首次使用會載入 97MB 分離模型(之後瀏覽器快取)
 
@@ -47,7 +54,8 @@ unregister,或換一個 port。
 
 ## 已知邊界(相對 Python 版)
 
-- YouTube 網址不支援(瀏覽器無法下載 YouTube;請先自行取得音檔)
+- YouTube 網址不支援(瀏覽器無法下載 YouTube;請先自行取得音檔;
+  跳秒改填「跳過開頭秒數」)
 - BPM < 100 的曲請填「BPM 提示」(無提示時預設範圍 100-240,與 Python 版同)
 - 2:1 整倍變速(如 85→170)偵測不到 — 兩網格相容,殘差不升;此類曲譜面等價
 - 開鈸/閉鈸細分較保守(無 keysound NMF;以高頻衰減特徵替代)

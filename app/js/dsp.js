@@ -115,6 +115,50 @@ export function onsetEnvelope(y, fbFlat) {
   return { env, fps: 100 };
 }
 
+// ── 有理比重採樣(多相 windowed-sinc)──
+// BGM 去鼓重編用:WebCodecs Opus 只吃 48kHz,pipeline 全程 44.1kHz
+// (44100→48000 即 L/M = 160/147)。Blackman 窗、單側 16 taps、
+// 各相位核歸一(DC 精確平坦)、核心對稱(零相位,不引入時間偏移)。
+// 上採樣 cutoff = 輸入 Nyquist;降採樣按比例縮(抗混疊),兩向皆可用。
+export function resample(y, srIn, srOut) {
+  if (srIn === srOut) return y;
+  let a = srIn, b = srOut;
+  while (b) [a, b] = [b, a % b];
+  const L = srOut / a, M = srIn / a;
+  const H = 16, T = 2 * H;
+  const fc = 0.475 * Math.min(1, srOut / srIn);
+  const kern = new Float32Array(L * T);   // 相位 p 的核:輸入格點 i0-H+1 … i0+H
+  for (let p = 0; p < L; p++) {
+    let s = 0;
+    for (let k = 0; k < T; k++) {
+      const u = k - H + 1 - p / L;        // 距理想取樣點(輸入樣本數)
+      const win = 0.42 + 0.5 * Math.cos(Math.PI * u / H) + 0.08 * Math.cos(2 * Math.PI * u / H);
+      const v = (u === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * u) / (Math.PI * u)) * win;
+      kern[p * T + k] = v; s += v;
+    }
+    for (let k = 0; k < T; k++) kern[p * T + k] /= s;
+  }
+  const n = y.length;
+  const out = new Float32Array(Math.ceil(n * L / M));
+  for (let j = 0; j < out.length; j++) {
+    const num = j * M;                    // 輸入位置 = num/L(num < 2^53,精確)
+    const i0 = Math.floor(num / L);
+    const kOff = (num - i0 * L) * T;
+    const base = i0 - H + 1;
+    let acc = 0;
+    if (base >= 0 && base + T <= n) {
+      for (let k = 0; k < T; k++) acc += y[base + k] * kern[kOff + k];
+    } else {
+      for (let k = 0; k < T; k++) {
+        const idx = base + k;
+        if (idx >= 0 && idx < n) acc += y[idx] * kern[kOff + k];
+      }
+    }
+    out[j] = acc;
+  }
+  return out;
+}
+
 // ── 細分用頻帶特徵(features.py 的 JS 版,只取細分需要的)──
 // 對事件時刻 t(秒):attack/body/tail 三段 9 頻帶能量、高頻衰減、立體聲 LR
 const BANDS_HZ = [20, 60, 120, 250, 500, 1000, 2000, 4000, 8000, 16000];

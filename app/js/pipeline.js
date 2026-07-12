@@ -171,8 +171,14 @@ function _gapSegments(ts, onset, lo, hi, gBpm) {
   allRms = Math.sqrt(allRms / env.length);
   const gaps = [];
   if (ts[0] > 6) gaps.push({ s: 0, e: ts[0] });
+  // 只收曲首稀疏區的空洞(前方不足 8 顆事件 — eternal 前 16s 情境)。
+  // 曲中空洞(breakdown/間奏)不立段:沒有鼓點就沒有音符要對位,主段網格
+  // 原樣鋪過;曲中真變速由殘差路徑在恢復鼓點的一側接手。8s 級窗的自相關
+  // 有 ±3 BPM 噪音(lag 整數化),對速度未變的曲中靜默只會產出恰好跨過
+  // 1.04 門檻的假段,再經接縫規整反向污染主段 BPM(實測:7s breakdown
+  // → 假 144 段 → 主段 135→135.33,三連音錯吸 4%→25%)。
   for (let i = 1; i < ts.length; i++)
-    if (ts[i] - ts[i - 1] > 6) gaps.push({ s: ts[i - 1], e: ts[i] });
+    if (ts[i] - ts[i - 1] > 6 && i < 8) gaps.push({ s: ts[i - 1], e: ts[i] });
   const out = [];
   for (const gz of gaps) {
     // 貪婪吸收:空洞左緣 2s 內的零星事件簇併入(它們屬於同一異速段)
@@ -378,7 +384,26 @@ export function quantizeEvents(events, grid) {
     if (seen.has(k)) return false;
     seen.add(k); return true;
   });
-  return { events: dedup, meanResid: residN ? residSum / residN : 0 };
+  // 三連音成組約束:孤立的三連音格位音符退回最近 16 分格。
+  // 真三連音樂句必成組(±1/6 或 ±1/3 拍內另有三連音格位音);孤立單顆
+  // 樂理上不成立,幾乎必是打點偏移 >~24ms 被三連音格錯吸的量化假象
+  // (0.55 擇優擋不住)。成組者(過鼓/裝飾樂句)原樣保留。孤立性以
+  // 全體同時判定(逐顆迭代會連鎖降級真樂句的端點)。
+  const tick48 = e => e.m * 48 + e.num * (48 / e.den);   // 16 分格 = 3 的倍數
+  const triTicks = new Set(dedup.map(tick48).filter(tk => tk % 3 !== 0));
+  const occupied = new Set(dedup.map(e => `${tick48(e)}|${e.cls}`));
+  const constrained = [];
+  for (const e of dedup) {
+    const tk = tick48(e);
+    if (tk % 3 === 0 || [2, -2, 4, -4].some(d => triTicks.has(tk + d))) { constrained.push(e); continue; }
+    const tk16 = Math.round(tk / 3) * 3;
+    const key = `${tk16}|${e.cls}`;
+    if (occupied.has(key)) continue;   // 目標格已有同 lane 音 → 同一擊的重複偵測,棄
+    occupied.add(key);
+    const m = Math.floor(tk16 / 48);
+    constrained.push({ m, num: (tk16 - m * 48) / 3, den: 16, cls: e.cls });
+  }
+  return { events: constrained, meanResid: residN ? residSum / residN : 0 };
 }
 
 // ═══════════ GBDT 難度簡化(simplify_ml.py + extract_features 移植)═══════════
@@ -679,4 +704,33 @@ export function encodeWav16(yL, yR, sr) {
     v.setInt16(o, Math.max(-32768, Math.min(32767, Math.round(yR[i] * 32767))), true); o += 2;
   }
   return buf;
+}
+
+// ═══════════ stem 打包(postMessage transfer 前置)═══════════
+// demucs 的 channelData 是「全部 stem 共用一塊大 buffer」的 view(demucs-js
+// apply.ts:new Float32Array(result.data.buffer, offset, length))— 直接把
+// dL.buffer、dR.buffer 放進 transfer list 會因同一 ArrayBuffer 出現兩次而
+// DataCloneError,且就算去重也會把整塊 4-stem buffer 搬去主線程。
+// 凡與輸入共享、非獨占整塊 buffer、或左右共用 buffer 者,slice 成緊湊獨立副本,
+// 保證回傳的兩個 buffer 相異且可各自 transfer。
+export function detachStems(dL, dR, yL, yR) {
+  const owns = a => a.byteOffset === 0 && a.byteLength === a.buffer.byteLength;
+  const stemL = (dL === yL || !owns(dL)) ? dL.slice() : dL;
+  const stemR = (dR === yR || !owns(dR) || dR.buffer === stemL.buffer) ? dR.slice() : dR;
+  return { stemL, stemR };
+}
+
+// ═══════════ BGM 伴奏(去鼓)═══════════
+// demucs 四 stem 除 drums 外相加 = 伴奏(bass+other+vocals)。取「stem 和」
+// 而非「混音減鼓軌」:減法會把鼓估計的殘差(鈸尾、房間殘響)原樣留在 BGM,
+// stem 和只剩漏進其他軌的少量鼓聲,去鼓較乾淨(Python demucs two-stems 同法)。
+// 輸出為緊湊新 buffer(與 stem 共用的大 buffer 脫鉤,可各自 transfer)。
+export function accompanimentFromStems(tracks, n) {
+  const bgmL = new Float32Array(n), bgmR = new Float32Array(n);
+  for (const [name, t] of Object.entries(tracks)) {
+    if (name === 'drums') continue;
+    const sL = t.channelData[0], sR = t.channelData[1] || sL;
+    for (let i = 0; i < n; i++) { bgmL[i] += sL[i]; bgmR[i] += sR[i]; }
+  }
+  return { bgmL, bgmR };
 }
