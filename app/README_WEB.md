@@ -23,6 +23,8 @@ python3 -m http.server 8080     # 或:npx serve
 - keysound 現作:各鼓件的擊打音(ks_*.wav)切自該曲鼓軌 — 選孤立度最大、
   能量達標的一擊,fade + 峰值 -3dB 正規化;不是罐頭音色
 - 「純鼓軌」勾選:輸入已是鼓軌時跳過分離
+- 「跳過開頭秒數」= 原 YouTube 網址的 `t=` 參數:譜面與 BGM 都從該秒起算
+  (BGM 會重編為無損 FLAC)
 - 完整混音的分離在 Chrome/Edge 走 WebGPU(M 系列很快);其他瀏覽器 WASM 較慢
 - 首次使用會載入 97MB 分離模型(之後瀏覽器快取)
 
@@ -35,7 +37,8 @@ python3 -m http.server 8080     # 或:npx serve
 
 ## 已知邊界(相對 Python 版)
 
-- YouTube 網址不支援(瀏覽器無法下載 YouTube;請先自行取得音檔)
+- YouTube 網址不支援(瀏覽器無法下載 YouTube;請先自行取得音檔;
+  跳秒改填「跳過開頭秒數」)
 - BPM < 100 的曲請填「BPM 提示」(無提示時預設範圍 100-240,與 Python 版同)
 - 2:1 整倍變速(如 85→170)偵測不到 — 兩網格相容,殘差不升;此類曲譜面等價
 - 開鈸/閉鈸細分較保守(無 keysound NMF;以高頻衰減特徵替代)

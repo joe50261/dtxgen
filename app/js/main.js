@@ -116,6 +116,8 @@ $('go').onclick = async () => {
   $('barbox').style.display = 'block'; $('bar').style.width = '1%';
   try {
     const isZip = /\.zip$/i.test(pickedFile.name);
+    // 跳過開頭秒數:等同 Python 版 YouTube 網址的 t= 參數
+    const startSec = Math.max(0, parseFloat($('start').value) || 0);
     let audioBuf, bgmBytes, bgmName, title = $('title').value.trim(), isStem = $('stem').checked;
     if (isZip) {
       $('stage').textContent = '解析譜包 zip(找無損鼓原軌)';
@@ -164,8 +166,26 @@ $('go').onclick = async () => {
     log('info', `解碼完成:${decoded.duration.toFixed(1)}s ${decoded.numberOfChannels}ch @${decoded.sampleRate}Hz(${(performance.now()-tDec).toFixed(0)}ms)`);
     // resample 到 44100(decodeAudioData 已按 AudioContext sampleRate 重採樣)
     const n = decoded.length;
-    const yL = new Float32Array(decoded.getChannelData(0));
-    const yR = new Float32Array(decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : decoded.getChannelData(0));
+    let yL = new Float32Array(decoded.getChannelData(0));
+    let yR = new Float32Array(decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : decoded.getChannelData(0));
+
+    if (startSec > 0) {
+      const off = Math.round(startSec * 44100);
+      if (off >= n) throw new Error(`跳過秒數(${startSec}s)不小於音檔長度(${(n / 44100).toFixed(1)}s)`);
+      $('stage').textContent = `跳過開頭 ${startSec}s — 重編 BGM`;
+      yL = yL.slice(off); yR = yR.slice(off);
+      // BGM 也要同起點:壓縮格式無法原樣裁切 → 解碼裁切後重編 FLAC(同回爐路徑格式)
+      const ac2 = new AudioContext({ sampleRate: 44100 });
+      const bgmDec = await ac2.decodeAudioData(bgmBytes);
+      ac2.close();
+      const o = Math.min(off, bgmDec.length);
+      bgmBytes = await encodeFlac(
+        new Float32Array(bgmDec.getChannelData(0).subarray(o)),
+        new Float32Array((bgmDec.numberOfChannels > 1 ? bgmDec.getChannelData(1) : bgmDec.getChannelData(0)).subarray(o)),
+        44100);
+      bgmName = 'bgm.flac';
+      log('info', `跳過開頭 ${startSec}s → 剩 ${(yL.length / 44100).toFixed(1)}s(BGM 重編 FLAC)`);
+    }
 
     jobCtx = { title, bgmBytes, bgmName };
     log('info', `提交 pipeline:title=${title} stem=${isStem} bgm=${bgmName} bpmHint=${parseFloat($('bpm').value) || '無'}`);
