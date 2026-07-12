@@ -680,3 +680,17 @@ export function encodeWav16(yL, yR, sr) {
   }
   return buf;
 }
+
+// ═══════════ stem 打包(postMessage transfer 前置)═══════════
+// demucs 的 channelData 是「全部 stem 共用一塊大 buffer」的 view(demucs-js
+// apply.ts:new Float32Array(result.data.buffer, offset, length))— 直接把
+// dL.buffer、dR.buffer 放進 transfer list 會因同一 ArrayBuffer 出現兩次而
+// DataCloneError,且就算去重也會把整塊 4-stem buffer 搬去主線程。
+// 凡與輸入共享、非獨占整塊 buffer、或左右共用 buffer 者,slice 成緊湊獨立副本,
+// 保證回傳的兩個 buffer 相異且可各自 transfer。
+export function detachStems(dL, dR, yL, yR) {
+  const owns = a => a.byteOffset === 0 && a.byteLength === a.buffer.byteLength;
+  const stemL = (dL === yL || !owns(dL)) ? dL.slice() : dL;
+  const stemR = (dR === yR || !owns(dR) || dR.buffer === stemL.buffer) ? dR.slice() : dR;
+  return { stemL, stemR };
+}

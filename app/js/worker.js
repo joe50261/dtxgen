@@ -3,7 +3,7 @@ import * as ort from '../vendor/ort/ort.min.mjs';
 import { ONNXHTDemucs } from '../vendor/demucs/onnx-htdemucs.js';
 import { separateTracks } from '../vendor/demucs/apply.js';
 import { adtofTranscribe } from './adtof.js';
-import { fuseAndSplit, estimateGrid, quantizeEvents, simplifyML, writeDtx, writeSetDef, makeKeysounds } from './pipeline.js';
+import { fuseAndSplit, estimateGrid, quantizeEvents, simplifyML, writeDtx, writeSetDef, makeKeysounds, detachStems } from './pipeline.js';
 import { onsetEnvelope } from './dsp.js';
 
 ort.env.wasm.wasmPaths = new URL('../vendor/ort/', import.meta.url).href;
@@ -131,10 +131,11 @@ onmessage = async (ev) => {
       files[lv] = lv + '.dtx';
     }
     const setdef = writeSetDef(title, files);
-    // 鼓原軌 PCM 傳回主線程編 FLAC(與 Python 版格式一致)
+    // 鼓原軌 PCM 傳回主線程編 FLAC(與 Python 版格式一致);detachStems 保證
+    // 兩 buffer 緊湊、相異、可各自 transfer(demucs 的 channelData 是共用
+    // 大 buffer 的 view,直接 transfer 會 DataCloneError)
     P(94, '打包鼓原軌');
-    const stemL = (dL === yL) ? dL.slice() : dL;   // 純鼓軌路徑下 dL 即輸入,slice 避免共享
-    const stemR = (dR === yR) ? dR.slice() : dR;
+    const { stemL, stemR } = detachStems(dL, dR, yL, yR);
     postMessage({
       type: 'done',
       charts: Object.fromEntries(Object.entries(charts).map(([k, v]) => [k, v.text])),
@@ -145,7 +146,8 @@ onmessage = async (ev) => {
         : String(grid.bpm),
       keysounds: Object.fromEntries(Object.entries(ksMap).map(([k, v]) => [v.name, v.bytes])),
       stemL, stemR, sr,
-    }, [stemL.buffer, stemR.buffer, ...Object.values(ksMap).map(v => v.bytes)]);
+      // Set 去重保險:transfer list 出現同一 ArrayBuffer 兩次即 DataCloneError
+    }, [...new Set([stemL.buffer, stemR.buffer, ...Object.values(ksMap).map(v => v.bytes)])]);
   } catch (e) {
     postMessage({ type: 'error', stage: STAGE, error: String(e && e.stack || e) });
   }
