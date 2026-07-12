@@ -128,7 +128,7 @@ $('go').onclick = async () => {
       zip.forEach((path, entry) => {
         const n = path.toLowerCase();
         if (/dtxgen_drums\.(wav|flac)$/.test(n)) stemEntry = entry;
-        if (/(^|\/)bgm\.(ogg|mp3|wav|m4a)$/.test(n)) bgmEntry = entry;
+        if (/(^|\/)bgm\.(ogg|opus|mp3|wav|m4a|flac)$/.test(n)) bgmEntry = entry;
         if (/\.dtx$/.test(n) && (!dtxEntry || entry._data.uncompressedSize > dtxEntry._data.uncompressedSize)) dtxEntry = entry;
         if (/dtxgen_source\.json$/.test(n)) srcEntry = entry;
       });
@@ -187,7 +187,7 @@ $('go').onclick = async () => {
       const bL = bgmDec.getChannelData(0).subarray(o);
       const bR = (bgmDec.numberOfChannels > 1 ? bgmDec.getChannelData(1) : bgmDec.getChannelData(0)).subarray(o);
       bgmBytes = lossless ? await encodeFlac(bL, bR, 44100) : await encodeOggOpus(bL, bR);
-      bgmName = lossless ? 'bgm.flac' : 'bgm.ogg';
+      bgmName = lossless ? 'bgm.flac' : 'bgm.opus';   // Opus 封裝副檔名 .opus(RFC 7845),.ogg 會被當 Vorbis
       log('info', `跳過開頭 ${startSec}s → 剩 ${(yL.length / 44100).toFixed(1)}s(BGM 重編 ${bgmName.split('.')[1]} ${(bgmBytes.length / 1048576).toFixed(1)} MB)`);
     }
 
