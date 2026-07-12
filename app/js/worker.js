@@ -149,7 +149,9 @@ onmessage = async (ev) => {
         : String(grid.bpm),
       keysounds: Object.fromEntries(Object.entries(ksMap).map(([k, v]) => [v.name, v.bytes])),
       stemL, stemR, sr,
-    }, [stemL.buffer, stemR.buffer, ...Object.values(ksMap).map(v => v.bytes)]);
+      // demucs 路徑下 stemL/stemR 是「同一個」扁平輸出 buffer 的兩個 view —
+      // transfer list 含重複 ArrayBuffer 會 DataCloneError,Set 去重、只轉移一次
+    }, [...new Set([stemL.buffer, stemR.buffer, ...Object.values(ksMap).map(v => v.bytes)])]);
   } catch (e) {
     postMessage({ type: 'error', stage: STAGE, error: String(e && e.stack || e) });
   }
