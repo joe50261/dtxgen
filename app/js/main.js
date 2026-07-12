@@ -122,6 +122,7 @@ $('go').onclick = async () => {
     // 跳過開頭秒數:等同 Python 版 YouTube 網址的 t= 參數
     const startSec = Math.max(0, parseFloat($('start').value) || 0);
     let audioBuf, bgmBytes, bgmName, title = $('title').value.trim(), isStem = $('stem').checked;
+    let stemPass = null;   // 來源鼓原軌已是 Opus → 原 bytes 原封沿用(重編只添世代損失)
     if (isZip) {
       $('stage').textContent = '解析譜包 zip(找鼓原軌)';
       log('info', '解析譜包 zip …');
@@ -145,6 +146,7 @@ $('go').onclick = async () => {
       if (stemEntry) {
         isStem = true;                      // 鼓原軌直跑:跳過分離
         audioBuf = await stemEntry.async('arraybuffer');
+        if (/\.opus$/i.test(stemEntry.name)) stemPass = audioBuf.slice(0);   // decodeAudioData 會 detach → 先留副本
         log('info', `找到鼓原軌:${stemEntry.name}(${(audioBuf.byteLength/1048576).toFixed(1)} MB)→ 跳過分離`);
         $('stage').textContent = '使用譜包內鼓原軌(跳過分離)';
       } else if (bgmEntry) {
@@ -158,6 +160,7 @@ $('go').onclick = async () => {
       audioBuf = await pickedFile.arrayBuffer();
       bgmBytes = audioBuf.slice(0);
       bgmName = 'bgm.' + (pickedFile.name.split('.').pop() || 'ogg').toLowerCase();
+      if (isStem && /\.opus$/i.test(pickedFile.name)) stemPass = audioBuf.slice(0);
     }
     title = sanitize(title || pickedFile.name.replace(/\.[^.]+$/, ''));
 
@@ -173,6 +176,7 @@ $('go').onclick = async () => {
     let yR = new Float32Array(decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : decoded.getChannelData(0));
 
     if (startSec > 0) {
+      stemPass = null;   // 裁切後內容已變 → 不能沿用,回打包重編
       const off = Math.round(startSec * 44100);
       if (off >= n) throw new Error(`跳過秒數(${startSec}s)不小於音檔長度(${(n / 44100).toFixed(1)}s)`);
       yL = yL.slice(off); yR = yR.slice(off);
@@ -198,7 +202,7 @@ $('go').onclick = async () => {
       }
     }
 
-    jobCtx = { title, bgmBytes, bgmName };
+    jobCtx = { title, bgmBytes, bgmName, stemPass };
     log('info', `提交 pipeline:title=${title} stem=${isStem} bgm=${isStem ? bgmName : '(分離後去鼓重編)'} bpmHint=${parseFloat($('bpm').value) || '無'}`);
     worker.postMessage({
       yL, yR, sr: 44100, isDrumsStem: isStem, title, bgmName,
@@ -219,18 +223,24 @@ async function finishJob(m) {
   const bgmName = m.bgm ? m.bgm.name : jobCtx.bgmName;
   if (m.bgm) log('info', `BGM 使用去鼓伴奏:${bgmName}(${(bgmBytes.byteLength / 1048576).toFixed(1)} MB)`);
   const tF = performance.now();
-  // 鼓原軌 Ogg/Opus 192kbps(同 BGM 規格;Opus 只吃 48kHz → 先重採樣)。
-  // 無 WebCodecs 的瀏覽器退 FLAC — 回爐掃描兩種副檔名都認
+  // 鼓原軌:來源已是 Opus 且未裁切 → 原 bytes 原封沿用(重編只添世代損失);
+  // 否則編 Ogg/Opus 192kbps(同 BGM 規格;Opus 只吃 48kHz → 先重採樣),
+  // 無 WebCodecs 的瀏覽器退 FLAC — 回爐掃描各副檔名都認
   let stemBytes, stemName;
-  try {
+  if (jobCtx.stemPass) {
+    stemBytes = new Uint8Array(jobCtx.stemPass);
+    stemName = 'dtxgen_drums.opus';
+    log('info', `鼓原軌沿用來源 Opus bytes(免重編、零世代損失):${(stemBytes.length/1048576).toFixed(1)} MB`);
+  } else try {
     stemBytes = await encodeOggOpus(resample(m.stemL, m.sr, 48000), resample(m.stemR, m.sr, 48000));
     stemName = 'dtxgen_drums.opus';
+    log('info', `鼓原軌編碼:${stemName}(${(stemBytes.length/1048576).toFixed(1)} MB,${((performance.now()-tF)/1000).toFixed(1)}s)`);
   } catch (e) {
     log('warn', `Opus 編碼不可用(${e && e.message || e})— 鼓原軌退 FLAC`);
     stemBytes = await encodeFlac(m.stemL, m.stemR, m.sr);
     stemName = 'dtxgen_drums.flac';
+    log('info', `鼓原軌編碼:${stemName}(${(stemBytes.length/1048576).toFixed(1)} MB,${((performance.now()-tF)/1000).toFixed(1)}s)`);
   }
-  log('info', `鼓原軌編碼:${stemName}(${(stemBytes.length/1048576).toFixed(1)} MB,${((performance.now()-tF)/1000).toFixed(1)}s)`);
   // zip 內平鋪(無資料夾層):解壓工具會以 zip 檔名建一層,內層再包資料夾會變兩層
   const dir = new JSZip();
   for (const [lv, text] of Object.entries(m.charts)) dir.file(`${lv}.dtx`, text);
