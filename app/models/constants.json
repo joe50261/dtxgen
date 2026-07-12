@@ -1,0 +1,1 @@
+{"pp_thresholds": {"KICK": 0.22, "SNARE": 0.24, "TOM": 0.32, "HH": 0.22, "CYM": 0.3}, "labels": ["KICK", "SNARE", "TOM", "HH", "CYM"], "fps": 100}

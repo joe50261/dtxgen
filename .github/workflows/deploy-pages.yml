@@ -1,0 +1,51 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時只跑一個 Pages 部署;不取消進行中的部署,避免半套上線
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      # --ignore-scripts:跳過 onnxruntime-node 的原生二進位下載(站台用不到)
+      - run: npm ci --ignore-scripts
+      # 同步 demucs 模型(174MB)+ demucs dist + ort runtime 到 app/(缺檔會失敗)
+      - run: node scripts/sync-vendor.mjs
+      - run: npm test
+      - run: npm run check-model
+      # 若此步以「Get Pages site failed」失敗:到 Settings → Pages 把 Source
+      # 設為「GitHub Actions」(一次性),再重跑本 workflow 即可。
+      # (enablement 選項不適用:啟用站台需 administration 權限,GITHUB_TOKEN 沒有)
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: app
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

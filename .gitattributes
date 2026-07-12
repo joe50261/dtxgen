@@ -1,0 +1,11 @@
+# 行尾正規化:文字檔一律 LF 入庫
+* text=auto eol=lf
+
+# 二進位資產
+*.onnx binary
+*.bin  binary
+*.wasm binary
+*.pcm  binary
+
+# 第三方 vendor 不計入語言統計、預設摺疊 diff
+app/vendor/** linguist-vendored
