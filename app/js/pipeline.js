@@ -384,7 +384,26 @@ export function quantizeEvents(events, grid) {
     if (seen.has(k)) return false;
     seen.add(k); return true;
   });
-  return { events: dedup, meanResid: residN ? residSum / residN : 0 };
+  // 三連音成組約束:孤立的三連音格位音符退回最近 16 分格。
+  // 真三連音樂句必成組(±1/6 或 ±1/3 拍內另有三連音格位音);孤立單顆
+  // 樂理上不成立,幾乎必是打點偏移 >~24ms 被三連音格錯吸的量化假象
+  // (0.55 擇優擋不住)。成組者(過鼓/裝飾樂句)原樣保留。孤立性以
+  // 全體同時判定(逐顆迭代會連鎖降級真樂句的端點)。
+  const tick48 = e => e.m * 48 + e.num * (48 / e.den);   // 16 分格 = 3 的倍數
+  const triTicks = new Set(dedup.map(tick48).filter(tk => tk % 3 !== 0));
+  const occupied = new Set(dedup.map(e => `${tick48(e)}|${e.cls}`));
+  const constrained = [];
+  for (const e of dedup) {
+    const tk = tick48(e);
+    if (tk % 3 === 0 || [2, -2, 4, -4].some(d => triTicks.has(tk + d))) { constrained.push(e); continue; }
+    const tk16 = Math.round(tk / 3) * 3;
+    const key = `${tk16}|${e.cls}`;
+    if (occupied.has(key)) continue;   // 目標格已有同 lane 音 → 同一擊的重複偵測,棄
+    occupied.add(key);
+    const m = Math.floor(tk16 / 48);
+    constrained.push({ m, num: (tk16 - m * 48) / 3, den: 16, cls: e.cls });
+  }
+  return { events: constrained, meanResid: residN ? residSum / residN : 0 };
 }
 
 // ═══════════ GBDT 難度簡化(simplify_ml.py + extract_features 移植)═══════════
