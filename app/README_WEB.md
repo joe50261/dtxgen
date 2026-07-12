@@ -24,7 +24,7 @@ python3 -m http.server 8080     # 或:npx serve
   能量達標的一擊,fade + 峰值 -3dB 正規化;不是罐頭音色
 - 「純鼓軌」勾選:輸入已是鼓軌時跳過分離
 - 「跳過開頭秒數」= 原 YouTube 網址的 `t=` 參數:譜面與 BGM 都從該秒起算
-  (BGM 會重編為無損 FLAC)
+  (BGM 裁切後重編:有損來源 → mp3 192kbps,wav/flac 來源 → FLAC)
 - 完整混音的分離在 Chrome/Edge 走 WebGPU(M 系列很快);其他瀏覽器 WASM 較慢
 - 首次使用會載入 97MB 分離模型(之後瀏覽器快取)
 

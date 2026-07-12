@@ -11,6 +11,13 @@ JSZip v3.10.1,(c) 2009-2016 Stuart Knightley,雙授權 MIT 或 GPLv3
 (本專案依 MIT 使用)。檔頭保留原始授權聲明。內含 pako(MIT)。
 <https://github.com/Stuk/jszip>
 
+### lamejs — `app/vendor/lamejs.min.js`
+
+@breezystack/lamejs v1.2.7(<https://github.com/zhuker/lamejs> 之修正發行版,
+<https://www.npmjs.com/package/@breezystack/lamejs>),LGPL-3.0 —
+LAME MP3 編碼器的純 JavaScript 移植。本專案以獨立檔案原樣散布、
+未修改其內容,依 LGPL 以「函式庫」方式使用;原始碼可於上述網址取得。
+
 ### libflac.js — `app/vendor/libflac.min.wasm.js` / `.wasm`
 
 libflac.js(<https://github.com/mmig/libflac.js>),MIT License —

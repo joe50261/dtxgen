@@ -73,6 +73,29 @@ function encodeFlac(yL, yR, sr) {
   });
 }
 
+// MP3 編碼(lamejs;「跳過開頭」裁切後的有損來源 BGM 用 — 不轉無損,重編回 mp3)
+async function encodeMp3(yL, yR, sr, kbps = 192) {
+  const enc = new lamejs.Mp3Encoder(2, sr, kbps);
+  const n = yL.length, BLOCK = 1152, l = new Int16Array(BLOCK), r = new Int16Array(BLOCK);
+  const chunks = [];
+  for (let off = 0; off < n; off += BLOCK) {
+    const m = Math.min(BLOCK, n - off);
+    for (let i = 0; i < m; i++) {
+      l[i] = Math.max(-32768, Math.min(32767, Math.round(yL[off + i] * 32767)));
+      r[i] = Math.max(-32768, Math.min(32767, Math.round(yR[off + i] * 32767)));
+    }
+    const d = enc.encodeBuffer(l.subarray(0, m), r.subarray(0, m));
+    if (d.length) chunks.push(d);
+    if ((off / BLOCK) % 500 === 499) await new Promise(res => setTimeout(res));   // 讓 UI 呼吸
+  }
+  const end = enc.flush();
+  if (end.length) chunks.push(end);
+  const out = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+}
+
 const drop = $('drop');
 drop.onclick = () => $('file').click();
 drop.ondragover = e => { e.preventDefault(); drop.classList.add('on'); };
@@ -174,17 +197,18 @@ $('go').onclick = async () => {
       if (off >= n) throw new Error(`跳過秒數(${startSec}s)不小於音檔長度(${(n / 44100).toFixed(1)}s)`);
       $('stage').textContent = `跳過開頭 ${startSec}s — 重編 BGM`;
       yL = yL.slice(off); yR = yR.slice(off);
-      // BGM 也要同起點:壓縮格式無法原樣裁切 → 解碼裁切後重編 FLAC(同回爐路徑格式)
+      // BGM 也要同起點:壓縮格式無法原樣裁切 → 解碼裁切後重編。
+      // 有損來源重編回 mp3(不轉無損);無損來源(wav/flac)重編 FLAC
       const ac2 = new AudioContext({ sampleRate: 44100 });
       const bgmDec = await ac2.decodeAudioData(bgmBytes);
       ac2.close();
       const o = Math.min(off, bgmDec.length);
-      bgmBytes = await encodeFlac(
-        new Float32Array(bgmDec.getChannelData(0).subarray(o)),
-        new Float32Array((bgmDec.numberOfChannels > 1 ? bgmDec.getChannelData(1) : bgmDec.getChannelData(0)).subarray(o)),
-        44100);
-      bgmName = 'bgm.flac';
-      log('info', `跳過開頭 ${startSec}s → 剩 ${(yL.length / 44100).toFixed(1)}s(BGM 重編 FLAC)`);
+      const bL = bgmDec.getChannelData(0).subarray(o);
+      const bR = (bgmDec.numberOfChannels > 1 ? bgmDec.getChannelData(1) : bgmDec.getChannelData(0)).subarray(o);
+      const lossless = /\.(wav|flac)$/i.test(bgmName);
+      bgmBytes = lossless ? await encodeFlac(bL, bR, 44100) : await encodeMp3(bL, bR, 44100);
+      bgmName = lossless ? 'bgm.flac' : 'bgm.mp3';
+      log('info', `跳過開頭 ${startSec}s → 剩 ${(yL.length / 44100).toFixed(1)}s(BGM 重編 ${bgmName.split('.')[1]} ${(bgmBytes.length / 1048576).toFixed(1)} MB)`);
     }
 
     jobCtx = { title, bgmBytes, bgmName };
