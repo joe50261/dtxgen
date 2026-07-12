@@ -18,8 +18,10 @@ python3 -m http.server 8080     # 或:npx serve
 ## 使用
 
 拖入音檔(mp3/ogg/wav/m4a/flac)→ 開始製譜 → 自動下載譜包 zip。
-- 譜包內含無損鼓原軌(dtxgen_drums.flac)— 把譜包 zip 拖回來即「回爐重做」:
-  直接從鼓原軌起跑,零音質損失、跳過分離,數十秒完成
+- 譜包內含鼓原軌(dtxgen_drums.opus,Ogg/Opus 192kbps;無 WebCodecs 的瀏覽器
+  退 FLAC)— 把譜包 zip 拖回來即「回爐重做」:直接從鼓原軌起跑、跳過分離,
+  數十秒完成。回爐時鼓原軌原封沿用、不重編(零世代損失;設「跳過開頭秒數」
+  或舊譜包的 dtxgen_drums.flac / .wav 才重編一次)
 - keysound 現作:各鼓件的擊打音(ks_*.wav)切自該曲鼓軌 — 選孤立度最大、
   能量達標的一擊,fade + 峰值 -3dB 正規化;不是罐頭音色
 - BGM 自動去鼓:完整混音輸入時,BGM 以分離出的伴奏(bass/other/vocals 相加)

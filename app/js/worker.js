@@ -149,7 +149,7 @@ onmessage = async (ev) => {
       files[lv] = lv + '.dtx';
     }
     const setdef = writeSetDef(title, files);
-    // 鼓原軌 PCM 傳回主線程編 FLAC(與 Python 版格式一致);detachStems 保證
+    // 鼓原軌 PCM 傳回主線程編 Opus(無 WebCodecs 退 FLAC);detachStems 保證
     // 兩 buffer 緊湊、相異、可各自 transfer(demucs 的 channelData 是共用
     // 大 buffer 的 view,直接 transfer 會 DataCloneError)
     P(94, '打包鼓原軌');
