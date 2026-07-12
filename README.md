@@ -37,7 +37,7 @@ GITHUB_TOKEN 無法代辦)。
 | `app/models/htdemucs.onnx`(174MB) | npm `demucs` | ✗(同步) |
 | `app/vendor/demucs/` | npm `demucs` dist(import 已改寫) | ✗(同步) |
 | `app/vendor/ort/` | npm `onnxruntime-web` dist | ✗(同步) |
-| `app/vendor/jszip.min.js`、`libflac.min.wasm.*`、`lamejs.min.js` | 手工 vendor | ✓ |
+| `app/vendor/jszip.min.js`、`libflac.min.wasm.*` | 手工 vendor | ✓ |
 | `app/models/` 其餘小模型(ADTOF/GBDT/濾波器組) | 訓練產物 | ✓ |
 
 第三方元件授權(含 htdemucs 權重「僅限個人/研究用途」之注意事項)見
