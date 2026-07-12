@@ -54,7 +54,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 由 `scripts/sync-vendor.mjs` 從 npm 套件同步:
 
-### demucs(demucs-js)— `app/vendor/demucs/`、`app/models/htdemucs.onnx`
+### demucs(demucs-js)— `app/vendor/demucs/`、`app/models/htdemucs.onnx.*`(24MiB 分塊部署)
 
 <https://github.com/bakkot/demucs-js>,程式碼 MIT License
 (Copyright (c) 2014 Kevin Gibbons and contributors)。

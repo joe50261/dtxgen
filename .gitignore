@@ -3,7 +3,7 @@ node_modules/
 
 # npm install(postinstall → scripts/sync-vendor.mjs)自動同步的資產 — 可再生,不進版控
 # 注意:app/vendor/jszip.min.js 與 libflac.min.wasm.* 不在同步範圍,須提交
-app/models/htdemucs.onnx
+app/models/htdemucs.onnx*
 app/vendor/demucs/
 app/vendor/ort/
 

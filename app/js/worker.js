@@ -16,11 +16,39 @@ const setStage = s => { STAGE = s; L(`階段:${s}`); };
 
 let adtofSession = null, demucsModel = null, gbdt = null, fb = null;
 
+// 大檔以 24MiB 分塊部署(靜態主機單檔上限,如 Cloudflare Pages 25MiB;切塊見
+// scripts/sync-vendor.mjs)— 依 manifest 循序抓回、寫進預配置緩衝
+// (循序而非並發:峰值記憶體 = 整檔 + 單塊)
+async function fetchChunked(dir, name, onPart) {
+  const mr = await fetch(dir + name + '.manifest.json');
+  if (!mr.ok) throw new Error(`${name}.manifest.json 載入失敗:HTTP ${mr.status} — 執行過 npm install 了嗎?`);
+  const { size, chunks } = await mr.json();
+  const buf = new Uint8Array(size);
+  let off = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    const r = await fetch(dir + chunks[i]);
+    if (!r.ok) throw new Error(`${chunks[i]} 載入失敗:HTTP ${r.status}`);
+    const part = new Uint8Array(await r.arrayBuffer());
+    buf.set(part, off); off += part.length;
+    onPart?.(i + 1, chunks.length);
+  }
+  if (off !== size) throw new Error(`${name} 不完整:${off}/${size} bytes`);
+  return buf;
+}
+
 async function ensureAssets(needDemucs) {
   const base = new URL('../models/', import.meta.url).href;
   if (!fb) {
     fb = new Float32Array(await (await fetch(base + 'fb_matrix.bin')).arrayBuffer());
     gbdt = await (await fetch(base + 'simplify_gbdt.json')).json();
+  }
+  if (!ort.env.wasm.wasmBinary) {
+    // ort 的 wasm 主體(26MB)同樣超過單檔上限 → 分塊自取後以 wasmBinary 餵給
+    // runtime(ort 便不再自抓 .wasm;glue .jsep.mjs 仍走上面的 wasmPaths)。
+    // 必須在第一個 InferenceSession.create 之前完成。
+    P(1, '載入運算核心(ONNX Runtime)');
+    ort.env.wasm.wasmBinary =
+      (await fetchChunked(new URL('../vendor/ort/', import.meta.url).href, 'ort-wasm-simd-threaded.jsep.wasm')).buffer;
   }
   if (!adtofSession) {
     P(2, '載入鼓事件模型');
@@ -34,9 +62,8 @@ async function ensureAssets(needDemucs) {
   if (needDemucs && !demucsModel) {
     P(4, '載入分離模型(174MB,首次較慢,之後有快取)');
     const t = performance.now();
-    const r = await fetch(base + 'htdemucs.onnx');
-    if (!r.ok) throw new Error(`htdemucs.onnx 載入失敗:HTTP ${r.status} — 執行過 npm install 了嗎?`);
-    const buf = new Uint8Array(await r.arrayBuffer());
+    const buf = await fetchChunked(base, 'htdemucs.onnx',
+      (i, n) => P(4 + 4 * i / n, `載入分離模型(${i}/${n})`));
     demucsModel = await ONNXHTDemucs.init(buf);
     L(`demucs 模型就緒(${(buf.length/1048576).toFixed(1)} MB, ${((performance.now()-t)/1000).toFixed(1)}s;EP=${typeof navigator!=='undefined'&&'gpu' in navigator?'webgpu 優先':'wasm'})`);
   }
