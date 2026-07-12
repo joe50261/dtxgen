@@ -12,7 +12,7 @@
     "start": "python3 -m http.server 8080 -d app",
     "serve": "npx --yes serve app -l 8080",
     "sync-vendor": "node scripts/sync-vendor.mjs",
-    "check-model": "node -e \"const fs=require('fs');process.exitCode=fs.existsSync('app/models/htdemucs.onnx')?0:(console.error('分離模型未就位:npm install'),1)\"",
+    "check-model": "node scripts/check-model.mjs",
     "test": "node tests/test_keysounds.mjs && node tests/smoke.mjs",
     "postinstall": "node scripts/sync-vendor.mjs"
   },
