@@ -173,26 +173,31 @@ $('go').onclick = async () => {
     if (startSec > 0) {
       const off = Math.round(startSec * 44100);
       if (off >= n) throw new Error(`跳過秒數(${startSec}s)不小於音檔長度(${(n / 44100).toFixed(1)}s)`);
-      $('stage').textContent = `跳過開頭 ${startSec}s — 重編 BGM`;
       yL = yL.slice(off); yR = yR.slice(off);
-      // BGM 也要同起點:壓縮格式無法原樣裁切 → 解碼裁切後重編。
-      // 有損來源重編回 Ogg/Opus(不轉無損);無損來源(wav/flac)重編 FLAC。
-      // Opus 只吃 48kHz,故有損來源在 48k 解碼裁切
-      const lossless = /\.(wav|flac)$/i.test(bgmName);
-      const bgmSr = lossless ? 44100 : 48000;
-      const ac2 = new AudioContext({ sampleRate: bgmSr });
-      const bgmDec = await ac2.decodeAudioData(bgmBytes);
-      ac2.close();
-      const o = Math.min(Math.round(startSec * bgmSr), bgmDec.length);
-      const bL = bgmDec.getChannelData(0).subarray(o);
-      const bR = (bgmDec.numberOfChannels > 1 ? bgmDec.getChannelData(1) : bgmDec.getChannelData(0)).subarray(o);
-      bgmBytes = lossless ? await encodeFlac(bL, bR, 44100) : await encodeOggOpus(bL, bR);
-      bgmName = lossless ? 'bgm.flac' : 'bgm.opus';   // Opus 封裝副檔名 .opus(RFC 7845),.ogg 會被當 Vorbis
-      log('info', `跳過開頭 ${startSec}s → 剩 ${(yL.length / 44100).toFixed(1)}s(BGM 重編 ${bgmName.split('.')[1]} ${(bgmBytes.length / 1048576).toFixed(1)} MB)`);
+      if (isStem) {
+        $('stage').textContent = `跳過開頭 ${startSec}s — 重編 BGM`;
+        // BGM 也要同起點:壓縮格式無法原樣裁切 → 解碼裁切後重編。
+        // 有損來源重編回 Ogg/Opus(不轉無損);無損來源(wav/flac)重編 FLAC。
+        // Opus 只吃 48kHz,故有損來源在 48k 解碼裁切
+        const lossless = /\.(wav|flac)$/i.test(bgmName);
+        const bgmSr = lossless ? 44100 : 48000;
+        const ac2 = new AudioContext({ sampleRate: bgmSr });
+        const bgmDec = await ac2.decodeAudioData(bgmBytes);
+        ac2.close();
+        const o = Math.min(Math.round(startSec * bgmSr), bgmDec.length);
+        const bL = bgmDec.getChannelData(0).subarray(o);
+        const bR = (bgmDec.numberOfChannels > 1 ? bgmDec.getChannelData(1) : bgmDec.getChannelData(0)).subarray(o);
+        bgmBytes = lossless ? await encodeFlac(bL, bR, 44100) : await encodeOggOpus(bL, bR);
+        bgmName = lossless ? 'bgm.flac' : 'bgm.opus';   // Opus 封裝副檔名 .opus(RFC 7845),.ogg 會被當 Vorbis
+        log('info', `跳過開頭 ${startSec}s → 剩 ${(yL.length / 44100).toFixed(1)}s(BGM 重編 ${bgmName.split('.')[1]} ${(bgmBytes.length / 1048576).toFixed(1)} MB)`);
+      } else {
+        // 分離路徑:BGM 由 worker 從(已裁切的)輸入分離出的伴奏重編,起點自然一致
+        log('info', `跳過開頭 ${startSec}s → 剩 ${(yL.length / 44100).toFixed(1)}s(BGM 稍後由去鼓伴奏重編,同起點)`);
+      }
     }
 
     jobCtx = { title, bgmBytes, bgmName };
-    log('info', `提交 pipeline:title=${title} stem=${isStem} bgm=${bgmName} bpmHint=${parseFloat($('bpm').value) || '無'}`);
+    log('info', `提交 pipeline:title=${title} stem=${isStem} bgm=${isStem ? bgmName : '(分離後去鼓重編)'} bpmHint=${parseFloat($('bpm').value) || '無'}`);
     worker.postMessage({
       yL, yR, sr: 44100, isDrumsStem: isStem, title, bgmName,
       bpmHint: parseFloat($('bpm').value) || null,
@@ -206,7 +211,11 @@ $('go').onclick = async () => {
 
 async function finishJob(m) {
   $('stage').textContent = '打包譜包 zip(FLAC 編碼鼓原軌)';
-  const { title, bgmBytes, bgmName } = jobCtx;
+  const { title } = jobCtx;
+  // BGM:分離路徑用 worker 重編的去鼓伴奏;純鼓軌/回爐路徑沿用來源 BGM
+  const bgmBytes = m.bgm ? m.bgm.bytes : jobCtx.bgmBytes;
+  const bgmName = m.bgm ? m.bgm.name : jobCtx.bgmName;
+  if (m.bgm) log('info', `BGM 使用去鼓伴奏:${bgmName}(${(bgmBytes.byteLength / 1048576).toFixed(1)} MB)`);
   const tF = performance.now();
   const flac = await encodeFlac(m.stemL, m.stemR, m.sr);   // 與 Python 版一致:16-bit FLAC
   log('info', `FLAC 編碼:${(flac.length/1048576).toFixed(1)} MB(${((performance.now()-tF)/1000).toFixed(1)}s)`);

@@ -694,3 +694,18 @@ export function detachStems(dL, dR, yL, yR) {
   const stemR = (dR === yR || !owns(dR) || dR.buffer === stemL.buffer) ? dR.slice() : dR;
   return { stemL, stemR };
 }
+
+// ═══════════ BGM 伴奏(去鼓)═══════════
+// demucs 四 stem 除 drums 外相加 = 伴奏(bass+other+vocals)。取「stem 和」
+// 而非「混音減鼓軌」:減法會把鼓估計的殘差(鈸尾、房間殘響)原樣留在 BGM,
+// stem 和只剩漏進其他軌的少量鼓聲,去鼓較乾淨(Python demucs two-stems 同法)。
+// 輸出為緊湊新 buffer(與 stem 共用的大 buffer 脫鉤,可各自 transfer)。
+export function accompanimentFromStems(tracks, n) {
+  const bgmL = new Float32Array(n), bgmR = new Float32Array(n);
+  for (const [name, t] of Object.entries(tracks)) {
+    if (name === 'drums') continue;
+    const sL = t.channelData[0], sR = t.channelData[1] || sL;
+    for (let i = 0; i < n; i++) { bgmL[i] += sL[i]; bgmR[i] += sR[i]; }
+  }
+  return { bgmL, bgmR };
+}

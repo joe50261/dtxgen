@@ -3,8 +3,9 @@ import * as ort from '../vendor/ort/ort.min.mjs';
 import { ONNXHTDemucs } from '../vendor/demucs/onnx-htdemucs.js';
 import { separateTracks } from '../vendor/demucs/apply.js';
 import { adtofTranscribe } from './adtof.js';
-import { fuseAndSplit, estimateGrid, quantizeEvents, simplifyML, writeDtx, writeSetDef, makeKeysounds, detachStems } from './pipeline.js';
-import { onsetEnvelope } from './dsp.js';
+import { fuseAndSplit, estimateGrid, quantizeEvents, simplifyML, writeDtx, writeSetDef, makeKeysounds, detachStems, accompanimentFromStems, encodeWav16 } from './pipeline.js';
+import { onsetEnvelope, resample } from './dsp.js';
+import { encodeOggOpus } from './oggopus.js';
 
 ort.env.wasm.wasmPaths = new URL('../vendor/ort/', import.meta.url).href;
 ort.env.wasm.numThreads = Math.min(4, (self.navigator?.hardwareConcurrency || 2));
@@ -76,7 +77,7 @@ onmessage = async (ev) => {
     L(`輸入:${(yL.length/sr).toFixed(1)}s @${sr}Hz, isDrumsStem=${isDrumsStem}, bpmHint=${bpmHint||'無'}`);
     await ensureAssets(!isDrumsStem);
     const n = yL.length;
-    let dL = yL, dR = yR;
+    let dL = yL, dR = yR, bgm = null;
     if (!isDrumsStem) {
       setStage('demucs 分離');
       const tSep = performance.now();
@@ -85,6 +86,22 @@ onmessage = async (ev) => {
         p => P(8 + Math.min(0.99, p / 17) * 52, `分離鼓軌 ${Math.round(Math.min(0.99, p / 17) * 100)}%`));
       dL = res.drums.channelData[0]; dR = res.drums.channelData[1];
       L(`分離完成(${((performance.now()-tSep)/1000).toFixed(0)}s)`);
+      // BGM 去鼓:玩家打的 keysound 才是鼓聲來源,BGM 若仍含原曲鼓軌會疊音
+      setStage('BGM 重編(去鼓)');
+      P(60, 'BGM 重編(去除鼓軌)');
+      const tBgm = performance.now();
+      const { bgmL, bgmR } = accompanimentFromStems(res, n);
+      try {
+        // WebCodecs Opus 只吃 48kHz → 先重採樣再編碼
+        // 副檔名 .opus(RFC 7845 Ogg 封裝):.ogg 會被播放器當 Vorbis 解
+        const bytes = (await encodeOggOpus(resample(bgmL, sr, 48000), resample(bgmR, sr, 48000))).buffer;
+        bgm = { name: 'bgm.opus', bytes };
+      } catch (e) {
+        // AudioEncoder 不可用(無 WebCodecs 的瀏覽器)→ 退 16-bit WAV(大但通吃)
+        L(`Opus 重編不可用(${e && e.message || e})— BGM 退 WAV`, 'warn');
+        bgm = { name: 'bgm.wav', bytes: encodeWav16(bgmL, bgmR, sr) };
+      }
+      L(`BGM 去鼓完成:${bgm.name}(${(bgm.bytes.byteLength/1048576).toFixed(1)} MB,${((performance.now()-tBgm)/1000).toFixed(1)}s)`);
     }
     setStage('ADTOF 鼓事件偵測');
     const tDet = performance.now();
@@ -126,7 +143,8 @@ onmessage = async (ev) => {
     const files = {};
     for (const lv of (levels || ['bsc', 'adv', 'ext', 'mstr'])) {
       const evLv = simplifyML(qevents, grid.bpm, lv, gbdt);
-      const w = writeDtx(evLv, grid, bgmName || 'bgm.ogg', title, lv, ksMap);
+      // 分離路徑:譜面引用 worker 重編的去鼓 BGM;純鼓軌/回爐:沿用來源 BGM 檔名
+      const w = writeDtx(evLv, grid, bgm ? bgm.name : (bgmName || 'bgm.ogg'), title, lv, ksMap);
       charts[lv] = w;
       files[lv] = lv + '.dtx';
     }
@@ -145,9 +163,10 @@ onmessage = async (ev) => {
         ? grid.segments.map(s => `${Math.round(s.bpm * 100) / 100}@${s.startMeasure}`).join('→') + '(變速)'
         : String(grid.bpm),
       keysounds: Object.fromEntries(Object.entries(ksMap).map(([k, v]) => [v.name, v.bytes])),
-      stemL, stemR, sr,
+      stemL, stemR, sr, bgm,
       // Set 去重保險:transfer list 出現同一 ArrayBuffer 兩次即 DataCloneError
-    }, [...new Set([stemL.buffer, stemR.buffer, ...Object.values(ksMap).map(v => v.bytes)])]);
+    }, [...new Set([stemL.buffer, stemR.buffer, ...(bgm ? [bgm.bytes] : []),
+                    ...Object.values(ksMap).map(v => v.bytes)])]);
   } catch (e) {
     postMessage({ type: 'error', stage: STAGE, error: String(e && e.stack || e) });
   }
