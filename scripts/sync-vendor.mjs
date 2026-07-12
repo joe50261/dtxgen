@@ -16,7 +16,7 @@ let demucsDir;
 try {
   demucsDir = dirname(require.resolve('demucs/package.json'));
 } catch {
-  console.log('demucs 尚未安裝(97MB,含分離模型)— 執行:npm install');
+  console.log('demucs 尚未安裝(含 174MB 分離模型)— 執行:npm install');
   process.exit(0);
 }
 

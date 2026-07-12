@@ -32,7 +32,7 @@ async function ensureAssets(needDemucs) {
     L(`ADTOF 模型就緒(${(buf.length/1048576).toFixed(1)} MB, ${((performance.now()-t)/1000).toFixed(1)}s)`);
   }
   if (needDemucs && !demucsModel) {
-    P(4, '載入分離模型(97MB,首次較慢,之後有快取)');
+    P(4, '載入分離模型(174MB,首次較慢,之後有快取)');
     const t = performance.now();
     const r = await fetch(base + 'htdemucs.onnx');
     if (!r.ok) throw new Error(`htdemucs.onnx 載入失敗:HTTP ${r.status} — 執行過 npm install 了嗎?`);
