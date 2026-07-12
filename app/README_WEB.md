@@ -22,6 +22,9 @@ python3 -m http.server 8080     # 或:npx serve
   直接從鼓原軌起跑,零音質損失、跳過分離,數十秒完成
 - keysound 現作:各鼓件的擊打音(ks_*.wav)切自該曲鼓軌 — 選孤立度最大、
   能量達標的一擊,fade + 峰值 -3dB 正規化;不是罐頭音色
+- BGM 自動去鼓:完整混音輸入時,BGM 以分離出的伴奏(bass/other/vocals 相加)
+  重編為 Ogg/Opus 192kbps — 鼓聲只由你打出的 keysound 發出,不與 BGM 疊音
+  (無 WebCodecs 的瀏覽器退 16-bit WAV;純鼓軌/回爐路徑沿用來源 BGM)
 - 「純鼓軌」勾選:輸入已是鼓軌時跳過分離
 - 「跳過開頭秒數」= 原 YouTube 網址的 `t=` 參數:譜面與 BGM 都從該秒起算
   (BGM 裁切後重編:有損來源 → Ogg/Opus 192kbps,wav/flac 來源 → FLAC)
