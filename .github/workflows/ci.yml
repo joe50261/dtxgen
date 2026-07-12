@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # --ignore-scripts:跳過 onnxruntime-node 的原生二進位下載(瀏覽器/測試皆用不到,
+      # 且其下載腳本偶發網路失敗);vendor 同步改為下一步顯式執行
+      - run: npm ci --ignore-scripts
+      - run: node scripts/sync-vendor.mjs
+      - run: npm test
