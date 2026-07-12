@@ -171,8 +171,14 @@ function _gapSegments(ts, onset, lo, hi, gBpm) {
   allRms = Math.sqrt(allRms / env.length);
   const gaps = [];
   if (ts[0] > 6) gaps.push({ s: 0, e: ts[0] });
+  // 只收曲首稀疏區的空洞(前方不足 8 顆事件 — eternal 前 16s 情境)。
+  // 曲中空洞(breakdown/間奏)不立段:沒有鼓點就沒有音符要對位,主段網格
+  // 原樣鋪過;曲中真變速由殘差路徑在恢復鼓點的一側接手。8s 級窗的自相關
+  // 有 ±3 BPM 噪音(lag 整數化),對速度未變的曲中靜默只會產出恰好跨過
+  // 1.04 門檻的假段,再經接縫規整反向污染主段 BPM(實測:7s breakdown
+  // → 假 144 段 → 主段 135→135.33,三連音錯吸 4%→25%)。
   for (let i = 1; i < ts.length; i++)
-    if (ts[i] - ts[i - 1] > 6) gaps.push({ s: ts[i - 1], e: ts[i] });
+    if (ts[i] - ts[i - 1] > 6 && i < 8) gaps.push({ s: ts[i - 1], e: ts[i] });
   const out = [];
   for (const gz of gaps) {
     // 貪婪吸收:空洞左緣 2s 內的零星事件簇併入(它們屬於同一異速段)
