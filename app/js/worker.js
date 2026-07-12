@@ -8,7 +8,10 @@ import { onsetEnvelope, resample } from './dsp.js';
 import { encodeOggOpus } from './oggopus.js';
 
 ort.env.wasm.wasmPaths = new URL('../vendor/ort/', import.meta.url).href;
-ort.env.wasm.numThreads = Math.min(4, (self.navigator?.hardwareConcurrency || 2));
+// 多執行緒需 crossOriginIsolated(COOP/COEP;由 index.html 的 coi-serviceworker
+// 注入)— worker 繼承主頁面的隔離狀態。未隔離時明示單線程,免得 ort 只是警告後回退
+ort.env.wasm.numThreads = self.crossOriginIsolated
+  ? Math.min(4, (self.navigator?.hardwareConcurrency || 2)) : 1;
 
 const P = (pct, msg) => postMessage({ type: 'progress', pct, msg });
 const L = (msg, level = 'info') => postMessage({ type: 'log', level, msg });
@@ -48,6 +51,7 @@ async function ensureAssets(needDemucs) {
     // runtime(ort 便不再自抓 .wasm;glue .jsep.mjs 仍走上面的 wasmPaths)。
     // 必須在第一個 InferenceSession.create 之前完成。
     P(1, '載入運算核心(ONNX Runtime)');
+    L(`WASM 線程:${ort.env.wasm.numThreads}(crossOriginIsolated=${!!self.crossOriginIsolated})`);
     ort.env.wasm.wasmBinary =
       (await fetchChunked(new URL('../vendor/ort/', import.meta.url).href, 'ort-wasm-simd-threaded.jsep.wasm')).buffer;
   }

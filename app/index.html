@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- COOP/COEP 由 Service Worker 注入(GitHub Pages 等靜態主機無法自訂 header)→
+     crossOriginIsolated → ort WASM 多執行緒。必須:(1) 放 app 根目錄 — SW scope
+     上限是腳本所在目錄,Pages 又設不了 Service-Worker-Allowed;(2) 排第一個腳本。
+     全站資產同源,固定 require-corp 模式(Safari 不支援 credentialless)。
+     首次載入會自動重整一次頁面以套用。 -->
+<script>window.coi = { coepCredentialless: () => false }</script>
+<script src="coi-serviceworker.min.js"></script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥁</text></svg>">
 <title>dtxgen web — 音檔 → DTX 譜包(純前端)</title>
 <style>
