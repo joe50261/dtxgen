@@ -748,11 +748,18 @@ export function accompanimentFromStems(tracks, n) {
 // 且會讓曲名尾巴帶 "no" 的檔(Techno / Volcano / Piano / mono…)的 "…no_drums" 誤中
 // 排除,把真鼓軌判成非鼓、與另一道對調 → 成品 BGM 變成鼓軌(正是本次要修掉的疊音 bug)。
 const DEDRUMMED = /(?:^|[^a-z0-9])(?:no[_\-\s.]?drums?|without[_\-\s.]?drums?|minus[_\-\s.]?drums?|drums?[_\-\s.]?(?:less|free|remov\w*|strip\w*|gone))(?![a-z0-9])/i;
+// 正面「去鼓 BGM / 伴奏」措辭(no_drums 家族在 DEDRUMMED,此處是其餘正面詞):
+// bgm / bgm_d(本 app 與常見 demucs 包裝的去鼓 BGM 命名)/ instrumental / inst /
+// accompaniment / karaoke / off_vocal。詞界同 DEDRUMMED 以「非英數」界定。
+const BGM_TOKEN = String.raw`bgm(?:[_\-. ]?d)?|instrumental|inst|accomp\w*|karaoke|off[_\-. ]?vocals?`;
+const BGM_STEM = new RegExp(String.raw`(?:^|[^a-z0-9])(?:${BGM_TOKEN})(?![a-z0-9])`, 'i');
 // 單軌角色:'drum'(鼓 stem)| 'bgm'(去鼓/伴奏 stem)| 'unknown'(判不出)。
-// 去鼓措辭(no_drums…)本身含 "drums",故 DEDRUMMED 需先判(勝過 /drums?/)。
+// no_drums 家族本身含 "drums",故 DEDRUMMED 需先判(勝過 /drums?/);其餘正面
+// 去鼓 BGM 詞(bgm_d…)本身不含 "drums",故在 /drums?/ 之後補判 BGM_STEM。
 export function stemRole(name) {
   if (DEDRUMMED.test(name)) return 'bgm';
   if (/drums?/i.test(name)) return 'drum';
+  if (BGM_STEM.test(name)) return 'bgm';
   return 'unknown';
 }
 // 兩檔配對:一個是鼓軌、另一個不是(去鼓 BGM 或判不出)→ 回鼓/BGM 索引;
@@ -765,14 +772,16 @@ export function classifyStemPair(nameA, nameB) {
 }
 
 // stem 檔名 → 去副檔名 + 去 stem 字尾的乾淨曲名(保留大小寫,供顯示 / 預設曲名)。
-// 字尾涵蓋:no_drums / without_drums / minus_drums / drum(less|free|removed|stripped|gone) / bgm_d / bgm。
-const STEM_SUFFIX = /[_\-. ]*(?:no[_\-. ]?drums?|without[_\-. ]?drums?|minus[_\-. ]?drums?|drums?(?:[_\-. ]?(?:less|free|remov\w*|strip\w*|gone))?|bgm[_\-]?d?)[_\-. ]*$/i;
+// 字尾涵蓋:no_drums 家族、drum(less|free|removed|stripped|gone),以及去鼓 BGM 詞
+// (BGM_TOKEN:bgm_d / bgm / instrumental…)—— 兩道 stem 去字尾後須落在「同一曲名」才配得起來。
+const STEM_SUFFIX = new RegExp(
+  String.raw`[_\-. ]*(?:no[_\-. ]?drums?|without[_\-. ]?drums?|minus[_\-. ]?drums?|drums?(?:[_\-. ]?(?:less|free|remov\w*|strip\w*|gone))?|${BGM_TOKEN})[_\-. ]*$`, 'i');
 export function cleanStemTitle(name) {
   const noExt = name.replace(/\.[^.]+$/, '');
   const b = noExt.replace(STEM_SUFFIX, '').replace(/[_\-. ]+$/, '');
   return b || noExt;
 }
-// 同一首歌的兩道 stem 配對用 key(乾淨曲名小寫)—— song.drums / song.no_drums → 同 key。
+// 同一首歌的兩道 stem 配對用 key(乾淨曲名小寫)—— song.drums / song.bgm_d → 同 key。
 export function stemBaseKey(name) { return cleanStemTitle(name).toLowerCase(); }
 
 // 把一批音檔檔名分組成「單檔」或「兩道 stem 對」(drum + 去鼓 BGM)。
@@ -786,16 +795,19 @@ export function groupStemNames(names) {
   }
   const role = names.map(stemRole), key = names.map(stemBaseKey);
   const used = new Array(names.length).fill(false);
+  const pairOf = new Map();   // drumIndex -> bgmIndex
+  // 第一輪:先為每個鼓軌找同 key、未用的去鼓 BGM 配對 —— 兩輪制才不會讓「排在
+  // 鼓軌之前的 BGM」(如拖入順序 bgm_d 在 drums 前)被提早當成單檔而漏配。
+  for (let i = 0; i < names.length; i++) {
+    if (role[i] !== 'drum' || used[i]) continue;
+    for (let k = 0; k < names.length; k++)
+      if (k !== i && !used[k] && role[k] === 'bgm' && key[k] === key[i]) { used[i] = used[k] = true; pairOf.set(i, k); break; }
+  }
+  // 第二輪:依原順序輸出(鼓軌帶出其 pair;已被配走的 BGM 跳過;其餘各自成列)
   const units = [];
   for (let i = 0; i < names.length; i++) {
-    if (used[i]) continue;
-    if (role[i] === 'drum') {
-      let j = -1;
-      for (let k = 0; k < names.length; k++)
-        if (k !== i && !used[k] && role[k] === 'bgm' && key[k] === key[i]) { j = k; break; }
-      if (j >= 0) { used[i] = used[j] = true; units.push({ kind: 'pair', drum: i, bgm: j }); continue; }
-    }
-    used[i] = true; units.push({ kind: 'single', i });
+    if (pairOf.has(i)) units.push({ kind: 'pair', drum: i, bgm: pairOf.get(i) });
+    else if (!used[i]) units.push({ kind: 'single', i });
   }
   return units;
 }

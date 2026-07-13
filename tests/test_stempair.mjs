@@ -49,9 +49,12 @@ A(classifyStemPair('no_drums_a.opus', 'no_drums_b.opus') === null, '皆 no_drums
 // ── stemRole:單軌角色('drum' | 'bgm' | 'unknown')──
 A(stemRole('song.drums.opus') === 'drum', "stemRole drums → 'drum'");
 A(stemRole('song.no_drums.opus') === 'bgm', "stemRole no_drums → 'bgm'");
-A(stemRole('song.bgm_d.opus') === 'unknown', "stemRole bgm_d → 'unknown'(非去鼓措辭,配對時歸 BGM)");
+A(stemRole('song.bgm_d.opus') === 'bgm', "stemRole bgm_d → 'bgm'(去鼓 BGM 命名)");
+A(stemRole('song.bgm.opus') === 'bgm', "stemRole bgm → 'bgm'");
+A(stemRole('song.instrumental.opus') === 'bgm', "stemRole instrumental → 'bgm'");
 A(stemRole('Techno_drums.wav') === 'drum', "stemRole Techno_drums → 'drum'(詞界不誤排除)");
 A(stemRole('vocals.wav') === 'unknown', "stemRole vocals → 'unknown'");
+A(stemRole('Instrument.opus') === 'unknown', "stemRole 曲名 Instrument → 'unknown'(非 stem 詞)");
 
 // ── cleanStemTitle / stemBaseKey:去 stem 字尾取乾淨曲名 / 配對 key ──
 A(cleanStemTitle('MyGO_FIRST_TAKE.drums.opus') === 'MyGO_FIRST_TAKE', 'cleanStemTitle 去 .drums');
@@ -76,5 +79,18 @@ A(eq(groupStemNames(['A.drums.opus', 'A.no_drums.opus', 'B.mp3', 'C.drums.wav', 
 A(eq(groupStemNames(['A.drums.opus', 'B.drums.opus', 'A.no_drums.opus']),
      [{ kind: 'pair', drum: 0, bgm: 2 }, { kind: 'single', i: 1 }]),
   '批量:僅同 key 者配對(B 鼓軌無伴奏 → 單列)');
+
+// 回歸(對應實測 4 檔 = 2 對、bgm_d 排在 drums 之前卻各自成 4 列的 bug):
+// bgm_d 需判為 BGM、且兩輪配對讓「BGM 在前」也能配到後面的鼓軌 → 應得 2 對
+A(eq(groupStemNames(['reimei.bgm_d.opus', 'reimei.drums.opus', 'kakehiki.bgm_d.opus', 'kakehiki.drums.opus']),
+     [{ kind: 'pair', drum: 1, bgm: 0 }, { kind: 'pair', drum: 3, bgm: 2 }]),
+  '批量 4 檔=2 對(bgm_d 在 drums 前也配得起來)');
+// 交錯順序同樣要配對(drums、bgm_d、bgm_d、drums)
+A(eq(groupStemNames(['A.drums.opus', 'B.bgm_d.opus', 'A.bgm_d.opus', 'B.drums.opus']),
+     [{ kind: 'pair', drum: 0, bgm: 2 }, { kind: 'pair', drum: 3, bgm: 1 }]),
+  '批量 4 檔交錯順序 → 依 key 正確配 2 對');
+// bgm_d 兩檔一起選(fast path)也對:鼓/BGM 索引正確
+A(eq(groupStemNames(['x.bgm_d.opus', 'x.drums.opus']), [{ kind: 'pair', drum: 1, bgm: 0 }]),
+  '兩檔 bgm_d + drums → pair(索引正確)');
 
 process.exit(fails ? 1 : 0);
