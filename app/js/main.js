@@ -81,7 +81,8 @@ const queue = [];
 let seq = 0;
 let processing = false;       // 佇列驅動中(有工作在跑或排隊等跑)
 let stopRequested = false;    // 要求完成當前工作後暫停
-let currentJob = null;        // 目前送進 worker 的 item(唯一在飛工作)
+let currentJob = null;        // 目前這輪處理的 item(前置處理或送 worker 中)
+let inFlight = null;          // 已 postMessage 進 worker、正等 worker 回覆的 item
 
 const drop = $('drop');
 drop.onclick = () => $('file').click();
@@ -120,9 +121,13 @@ const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'modu
 
 worker.onerror = ev => {
   log('error', `worker 錯誤:${ev.message} @ ${ev.filename}:${ev.lineno}`);
-  // worker 層級的致命例外(pipeline 內已 try/catch,這裡是非預期崩潰)—
-  // 結算當前工作為失敗並續跑下一個,不讓整批卡死
-  if (currentJob) settleError(currentJob, `worker 崩潰:${ev.message}`);
+  // worker 層級的非預期崩潰(pipeline 內已 try/catch)。只結算「確實已送進 worker、
+  // 仍在等回覆」的那件 —— inFlight 於收到終結訊息(done/error)時即清空,故打包/
+  // 前置處理(主線程 await)期間的殘留 onerror 不會誤殺當前或下一件工作。
+  if (inFlight && inFlight.status === 'active') {
+    const j = inFlight; inFlight = null;
+    settleError(j, `worker 崩潰:${ev.message}`);
+  }
 };
 worker.onmessage = ev => {
   const m = ev.data;
@@ -134,8 +139,10 @@ worker.onmessage = ev => {
     $('stage').textContent = `處理中 ${doneCount() + 1}/${queue.length} — ${currentJob.name}:${m.msg}`;
     renderRow(currentJob);
   } else if (m.type === 'error') {
+    inFlight = null;   // 終結訊息:worker 對本件已無後續訊息
     settleError(currentJob, `階段「${m.stage || '?'}」:${m.error}`);
   } else if (m.type === 'done') {
+    inFlight = null;   // 終結訊息:接下來的打包在主線程 await,期間 onerror 不應誤判本件
     finishJob(currentJob, m);
   }
 };
@@ -178,16 +185,20 @@ $('clearQ').onclick = () => {
 
 // 送出下一個待處理工作;沒有則收尾
 function advance() {
-  currentJob = null;
+  currentJob = null; inFlight = null;
   $('bar').style.width = '0%';
-  if (stopRequested) {
-    stopRequested = false; processing = false;
-    log('info', '已停止佇列 — 尚有未處理項目,可再按「開始製譜」續跑');
-    $('stage').textContent = '已停止 — 佇列尚有未處理項目';
-    updateControls();
-    return;
-  }
   const next = queue.find(j => j.status === 'pending');
+  if (stopRequested) {
+    stopRequested = false;
+    if (next) {   // 確有未處理項目才顯示「已停止」;否則其實已全部做完 → 走正常收尾
+      processing = false;
+      log('info', '已停止佇列 — 尚有未處理項目,可再按「開始製譜」續跑');
+      $('stage').textContent = '已停止 — 佇列尚有未處理項目';
+      $('barbox').style.display = 'none';
+      updateControls();
+      return;
+    }
+  }
   if (next) { submitJob(next); return; }
   // 全部處理完
   processing = false;
@@ -203,9 +214,16 @@ function advance() {
 function settleError(item, msg) {
   if (item.status === 'done' || item.status === 'error') return;
   item.status = 'error'; item.error = msg; item.stage = '';
+  releaseCtx(item);   // 釋放來源音訊位元組副本,勿隨失敗項留在佇列
   log('error', `失敗(${item.name}):${msg}`);
   renderRow(item);
   advance();
+}
+
+// 釋放 item.ctx 內的來源音訊位元組副本(bgmBytes / stemPass)。這些只在打包時需要;
+// 若不釋放,整批的來源副本會隨各佇列項目累積在主線程記憶體(原單一全域 jobCtx 只留一份)。
+function releaseCtx(item) {
+  if (item.ctx) { item.ctx.bgmBytes = null; item.ctx.stemPass = null; }
 }
 
 // 前置處理(解 zip / 解碼 / 跳秒裁切)→ 送進 worker。以 item 取代原全域狀態。
@@ -305,6 +323,7 @@ async function submitJob(item) {
     item.ctx = { title, bgmBytes, bgmName, stemPass };
     setStage('送入 pipeline');
     log('info', `提交 pipeline:title=${title} stem=${isStem} bgm=${isStem ? bgmName : '(分離後去鼓重編)'} bpmHint=${parseFloat($('bpm').value) || '無'}`);
+    inFlight = item;   // 自此刻起本件確實在 worker 內;收到 done/error 前歸 onerror 認領
     worker.postMessage({
       yL, yR, sr: 44100, isDrumsStem: isStem, title, bgmName,
       bpmHint: parseFloat($('bpm').value) || null,
@@ -355,6 +374,9 @@ async function finishJob(item, m) {
     for (const [name, bytes] of Object.entries(m.keysounds || {})) dir.file(name, bytes);
     log('info', `keysounds:${Object.keys(m.keysounds || {}).length} 顆(現作)`);
     const blob = await dir.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    releaseCtx(item);   // 來源位元組已入 zip,釋放主線程副本(避免整批累積)
+    // 防守:打包期間若本件已被(如 onerror)結算,放棄本結果、勿重複前進 advance()
+    if (item.status !== 'active') { log('warn', `${item.name} 於打包期間已結算(${item.status})— 丟棄本次結果`); return; }
     if (item.url) URL.revokeObjectURL(item.url);   // 重跑同項目時釋放舊 URL
     item.url = URL.createObjectURL(blob);
     item.dlName = `${title}_dtx.zip`;
