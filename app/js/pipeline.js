@@ -748,10 +748,54 @@ export function accompanimentFromStems(tracks, n) {
 // 且會讓曲名尾巴帶 "no" 的檔(Techno / Volcano / Piano / mono…)的 "…no_drums" 誤中
 // 排除,把真鼓軌判成非鼓、與另一道對調 → 成品 BGM 變成鼓軌(正是本次要修掉的疊音 bug)。
 const DEDRUMMED = /(?:^|[^a-z0-9])(?:no[_\-\s.]?drums?|without[_\-\s.]?drums?|minus[_\-\s.]?drums?|drums?[_\-\s.]?(?:less|free|remov\w*|strip\w*|gone))(?![a-z0-9])/i;
+// 單軌角色:'drum'(鼓 stem)| 'bgm'(去鼓/伴奏 stem)| 'unknown'(判不出)。
+// 去鼓措辭(no_drums…)本身含 "drums",故 DEDRUMMED 需先判(勝過 /drums?/)。
+export function stemRole(name) {
+  if (DEDRUMMED.test(name)) return 'bgm';
+  if (/drums?/i.test(name)) return 'drum';
+  return 'unknown';
+}
+// 兩檔配對:一個是鼓軌、另一個不是(去鼓 BGM 或判不出)→ 回鼓/BGM 索引;
+// 兩者皆鼓軌或皆非鼓軌則無法分辨,回 null(交由呼叫端報錯 / 不配對)。
 export function classifyStemPair(nameA, nameB) {
-  const isDrum = n => /drums?/i.test(n) && !DEDRUMMED.test(n);
-  const a = isDrum(nameA), b = isDrum(nameB);
+  const a = stemRole(nameA) === 'drum', b = stemRole(nameB) === 'drum';
   if (a && !b) return { drum: 0, bgm: 1 };
   if (b && !a) return { drum: 1, bgm: 0 };
   return null;
+}
+
+// stem 檔名 → 去副檔名 + 去 stem 字尾的乾淨曲名(保留大小寫,供顯示 / 預設曲名)。
+// 字尾涵蓋:no_drums / without_drums / minus_drums / drum(less|free|removed|stripped|gone) / bgm_d / bgm。
+const STEM_SUFFIX = /[_\-. ]*(?:no[_\-. ]?drums?|without[_\-. ]?drums?|minus[_\-. ]?drums?|drums?(?:[_\-. ]?(?:less|free|remov\w*|strip\w*|gone))?|bgm[_\-]?d?)[_\-. ]*$/i;
+export function cleanStemTitle(name) {
+  const noExt = name.replace(/\.[^.]+$/, '');
+  const b = noExt.replace(STEM_SUFFIX, '').replace(/[_\-. ]+$/, '');
+  return b || noExt;
+}
+// 同一首歌的兩道 stem 配對用 key(乾淨曲名小寫)—— song.drums / song.no_drums → 同 key。
+export function stemBaseKey(name) { return cleanStemTitle(name).toLowerCase(); }
+
+// 把一批音檔檔名分組成「單檔」或「兩道 stem 對」(drum + 去鼓 BGM)。
+// 恰兩個且成對 → 直接一對(使用者刻意一起選,不要求同 key);批量則以同一 base key 的
+// 「鼓 + 去鼓」配對,其餘各自成列。回傳(以索引表示,與檔案物件解耦、便於測試):
+//   { kind:'single', i } | { kind:'pair', drum:i, bgm:j }
+export function groupStemNames(names) {
+  if (names.length === 2) {
+    const c = classifyStemPair(names[0], names[1]);
+    if (c) return [{ kind: 'pair', drum: c.drum, bgm: c.bgm }];
+  }
+  const role = names.map(stemRole), key = names.map(stemBaseKey);
+  const used = new Array(names.length).fill(false);
+  const units = [];
+  for (let i = 0; i < names.length; i++) {
+    if (used[i]) continue;
+    if (role[i] === 'drum') {
+      let j = -1;
+      for (let k = 0; k < names.length; k++)
+        if (k !== i && !used[k] && role[k] === 'bgm' && key[k] === key[i]) { j = k; break; }
+      if (j >= 0) { used[i] = used[j] = true; units.push({ kind: 'pair', drum: i, bgm: j }); continue; }
+    }
+    used[i] = true; units.push({ kind: 'single', i });
+  }
+  return units;
 }

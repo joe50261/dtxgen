@@ -1,7 +1,7 @@
 // classifyStemPair 單元驗證:跳過分離的正確輸入是「兩道 stem」— drums + 去鼓 BGM。
 // 舊「純鼓軌」單檔設計錯在:demucs stem 本是兩道,只給鼓軌會缺伴奏、系統只能
 // 誤把鼓軌當 BGM。此處驗證依檔名判別哪道是鼓軌(另一道即去鼓 BGM)。
-import { classifyStemPair } from '../app/js/pipeline.js';
+import { classifyStemPair, stemRole, cleanStemTitle, stemBaseKey, groupStemNames } from '../app/js/pipeline.js';
 
 let fails = 0;
 const A = (ok, msg) => { console.log((ok ? 'PASS' : 'FAIL') + ' ' + msg); if (!ok) fails++; };
@@ -45,5 +45,36 @@ A(eq(classifyStemPair('drums_freestyle.wav', 'no_drums.wav'), { drum: 0, bgm: 1 
 A(classifyStemPair('stem1.opus', 'stem2.opus') === null, '皆不像鼓軌 → null');
 A(classifyStemPair('a.drums.opus', 'b.drums.opus') === null, '皆像鼓軌 → null');
 A(classifyStemPair('no_drums_a.opus', 'no_drums_b.opus') === null, '皆 no_drums → null');
+
+// ── stemRole:單軌角色('drum' | 'bgm' | 'unknown')──
+A(stemRole('song.drums.opus') === 'drum', "stemRole drums → 'drum'");
+A(stemRole('song.no_drums.opus') === 'bgm', "stemRole no_drums → 'bgm'");
+A(stemRole('song.bgm_d.opus') === 'unknown', "stemRole bgm_d → 'unknown'(非去鼓措辭,配對時歸 BGM)");
+A(stemRole('Techno_drums.wav') === 'drum', "stemRole Techno_drums → 'drum'(詞界不誤排除)");
+A(stemRole('vocals.wav') === 'unknown', "stemRole vocals → 'unknown'");
+
+// ── cleanStemTitle / stemBaseKey:去 stem 字尾取乾淨曲名 / 配對 key ──
+A(cleanStemTitle('MyGO_FIRST_TAKE.drums.opus') === 'MyGO_FIRST_TAKE', 'cleanStemTitle 去 .drums');
+A(cleanStemTitle('MyGO_FIRST_TAKE.bgm_d.opus') === 'MyGO_FIRST_TAKE', 'cleanStemTitle 去 .bgm_d');
+A(cleanStemTitle('song_no_drums.wav') === 'song', 'cleanStemTitle 去 _no_drums');
+A(cleanStemTitle('mix.mp3') === 'mix', 'cleanStemTitle 純混音檔不動(僅去副檔名)');
+A(stemBaseKey('Song.DRUMS.opus') === stemBaseKey('Song.no_drums.opus'), '同曲兩道 stem → 同 base key');
+
+// ── groupStemNames:佇列卡片分組 —— 兩道 stem 併一列(跳過分離),其餘各自成列 ──
+// 恰兩檔且成對(即使 base key 不同,如上傳檔的隨機前綴)→ 一張卡片
+A(eq(groupStemNames(['a1.drums.opus', 'b2.bgm_d.opus']), [{ kind: 'pair', drum: 0, bgm: 1 }]),
+  '兩檔成對 → 一列 pair(前綴不同也配)');
+A(eq(groupStemNames(['x.bgm_d.opus', 'x.drums.opus']), [{ kind: 'pair', drum: 1, bgm: 0 }]),
+  '兩檔成對 → drum/bgm 索引正確(順序反過來)');
+// 單一混音檔 → 單列(走完整分離)
+A(eq(groupStemNames(['song.mp3']), [{ kind: 'single', i: 0 }]), '單一混音檔 → single');
+// 批量:同 base key 的鼓 + 去鼓配對,無關檔各自成列,保留順序
+A(eq(groupStemNames(['A.drums.opus', 'A.no_drums.opus', 'B.mp3', 'C.drums.wav', 'C.no_drums.wav']),
+     [{ kind: 'pair', drum: 0, bgm: 1 }, { kind: 'single', i: 2 }, { kind: 'pair', drum: 3, bgm: 4 }]),
+  '批量:A/C 各自配對、B 單列(保留順序)');
+// 批量兩鼓軌不同曲、只有一去鼓 → 只有 key 相符者配對,另一鼓軌單列
+A(eq(groupStemNames(['A.drums.opus', 'B.drums.opus', 'A.no_drums.opus']),
+     [{ kind: 'pair', drum: 0, bgm: 2 }, { kind: 'single', i: 1 }]),
+  '批量:僅同 key 者配對(B 鼓軌無伴奏 → 單列)');
 
 process.exit(fails ? 1 : 0);
