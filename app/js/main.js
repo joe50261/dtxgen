@@ -1,6 +1,8 @@
 // main.js — UI:多選/批量導入 → 佇列依序製譜(檔案解碼主線程 → Worker pipeline → JSZip 譜包下載)
+// 跳過分離的正確輸入是「兩道 stem」(鼓軌 + 去鼓 BGM):加入佇列時自動配對成同一張卡片。
 import { encodeOggOpus } from './oggopus.js';
 import { resample } from './dsp.js';
+import { cleanStemTitle, groupStemNames } from './pipeline.js';
 const $ = id => document.getElementById(id);
 
 // ── logger:UI 面板 + console 同步;error 帶完整 stack;可下載 ──
@@ -37,6 +39,7 @@ log('info', `WebGPU: ${'gpu' in navigator ? '可用' : '不可用(分離將走 W
 // 曲名消毒:任何來源(手填/檔名/譜包 #TITLE/metadata)統一過濾 —
 // 含 / 的曲名會讓 zip.folder 建出巢狀層級(打包層級錯誤的根源)
 const sanitize = s => (s || '').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 80) || 'song';
+const mb = b => (b / 1048576).toFixed(1) + ' MB';
 
 // FLAC 編碼(libflac WASM;16-bit 同 soundfile 預設)— 無損來源 BGM 重編,
 // 以及無 WebCodecs 時鼓原軌的退路
@@ -76,7 +79,9 @@ function encodeFlac(yL, yR, sr) {
 }
 
 // ── 佇列:多選 / 批量導入,共用單一 worker 依序製譜(模型只載入一次、保持熱)──
-// item: { id, file, name, status, progress, stage, error, url, dlName, summary, stats, ctx, el }
+// item: { id, file, bgmFile, pair, name, autoTitle, status, title, bpm, start,
+//         finalTitle, progress, stage, error, url, dlName, summary, stats, ctx, el }
+//   pair=true:兩道已分離 stem — file=鼓軌、bgmFile=去鼓 BGM,跳過分離。
 const queue = [];
 let seq = 0;
 let processing = false;       // 佇列驅動中(有工作在跑或排隊等跑)
@@ -85,6 +90,7 @@ let currentJob = null;        // 目前這輪處理的 item(前置處理或送 w
 let inFlight = null;          // 已 postMessage 進 worker、正等 worker 回覆的 item
 let runDone = 0, runErr = 0;  // 本輪(這次「開始製譜」)的成功/失敗計數(完成/失敗列會留在佇列供重下,故不能用全佇列統計)
 
+const DROP_HINT = '拖放或點擊選擇 — 可一次多選音檔或譜包 zip 回爐;鼓軌 + 去鼓 BGM 兩道會自動配對成一張卡片';
 const drop = $('drop');
 drop.onclick = () => $('file').click();
 drop.ondragover = e => { e.preventDefault(); drop.classList.add('on'); };
@@ -96,27 +102,59 @@ drop.ondrop = e => {
 // value 清空:同一批檔案再次選取(或移除後重選)仍會觸發 change
 $('file').onchange = () => { if ($('file').files.length) addFiles($('file').files); $('file').value = ''; };
 
+// 保留拖入順序地把整批(含 zip)規劃成佇列單元:zip 各自單檔;音檔交給 groupStemNames 配對。
+// 音檔中成對的「鼓 stem + 去鼓 BGM stem」併為同一列(跳過分離),其餘各自成列。
+// 回傳單元:{kind:'single', file} | {kind:'pair', drum, bgm}
+function planUnits(fresh) {
+  const audio = fresh.filter(f => !/\.zip$/i.test(f.name));
+  const pairMap = new Map();    // drumFile -> bgmFile
+  const consumed = new Set();   // 已被配對吃掉的 bgm 檔(走訪時跳過)
+  for (const u of groupStemNames(audio.map(f => f.name)))
+    if (u.kind === 'pair') { pairMap.set(audio[u.drum], audio[u.bgm]); consumed.add(audio[u.bgm]); }
+  const units = [];
+  for (const f of fresh) {
+    if (consumed.has(f)) continue;
+    if (/\.zip$/i.test(f.name)) { units.push({ kind: 'single', file: f }); continue; }
+    if (pairMap.has(f)) units.push({ kind: 'pair', drum: f, bgm: pairMap.get(f) });
+    else units.push({ kind: 'single', file: f });
+  }
+  return units;
+}
+
+function baseItem(file, over) {
+  return {
+    id: ++seq, file, bgmFile: null, pair: false,
+    name: file.name, autoTitle: file.name.replace(/\.[^.]+$/, ''),
+    status: 'pending',
+    // 每列參數:加入時以上方「預設值」帶入,之後可個別調整(曲名留空 → 自動用檔名/譜包內曲名)
+    title: '', bpm: $('bpm').value.trim(), start: $('start').value.trim(),
+    finalTitle: '',   // 製譜時解析出的實際曲名(供卡片顯示)
+    progress: 0, stage: '', error: '', url: null, dlName: '', summary: '', stats: '',
+    ctx: null, el: null, ...over,
+  };
+}
+
 function addFiles(fileList) {
-  let added = 0, skipped = 0;
-  for (const f of [...fileList]) {
-    // 去重:與尚未完成(等待/處理中)的同名同大小檔案不重複入列(避免重複拖放)
-    const dup = queue.some(j => (j.status === 'pending' || j.status === 'active')
-      && j.file.name === f.name && j.file.size === f.size);
-    if (dup) { skipped++; continue; }
-    queue.push({
-      id: ++seq, file: f, name: f.name, status: 'pending',
-      // 每列參數:加入時以上方「預設值」帶入,之後可個別調整(曲名留空 → 自動用檔名/譜包內曲名)
-      title: '', bpm: $('bpm').value.trim(), start: $('start').value.trim(), stem: $('stem').checked,
-      finalTitle: '',   // 製譜時解析出的實際曲名(供卡片顯示)
-      progress: 0, stage: '', error: '', url: null, dlName: '', summary: '', stats: '',
-      ctx: null, el: null,
-    });
+  // 去重:與尚未完成(等待/處理中)項目的任一來源檔(單檔 file 或 pair 的 file/bgmFile)同名同大小即略過
+  const isQueued = f => queue.some(j => (j.status === 'pending' || j.status === 'active')
+    && ((j.file.name === f.name && j.file.size === f.size)
+      || (j.bgmFile && j.bgmFile.name === f.name && j.bgmFile.size === f.size)));
+  const fresh = [];
+  let skipped = 0;
+  for (const f of [...fileList]) { if (isQueued(f)) skipped++; else fresh.push(f); }
+  let added = 0, pairs = 0;
+  for (const u of planUnits(fresh)) {
+    if (u.kind === 'pair') {
+      const title = cleanStemTitle(u.drum.name);
+      queue.push(baseItem(u.drum, { bgmFile: u.bgm, pair: true, name: title, autoTitle: title }));
+      pairs++;
+    } else {
+      queue.push(baseItem(u.file, {}));
+    }
     added++;
   }
-  log('info', `加入佇列:${added} 檔${skipped ? `(略過 ${skipped} 個重複)` : ''} — 目前佇列 ${queue.length} 檔`);
-  drop.textContent = queue.length
-    ? `已選 ${queue.length} 檔(可再拖入更多)— 按「開始製譜」`
-    : '拖放或點擊選擇 — 可一次多選音檔或譜包 zip 回爐';
+  log('info', `加入佇列:${added} 列${pairs ? `(其中 ${pairs} 組兩道 stem)` : ''}${skipped ? `,略過 ${skipped} 個重複檔` : ''} — 目前佇列 ${queue.length} 列`);
+  drop.textContent = queue.length ? `已選 ${queue.length} 列(可再拖入更多)— 按「開始製譜」` : DROP_HINT;
   renderQueue();
   updateControls();
 }
@@ -195,9 +233,7 @@ $('clearQ').onclick = () => {
   const keep = currentJob ? [currentJob] : [];
   queue.length = 0; queue.push(...keep);
   log('info', '已清空佇列' + (currentJob ? '(當前工作保留)' : ''));
-  drop.textContent = queue.length
-    ? `已選 ${queue.length} 檔(可再拖入更多)— 按「開始製譜」`
-    : '拖放或點擊選擇 — 可一次多選音檔或譜包 zip 回爐';
+  drop.textContent = queue.length ? `已選 ${queue.length} 列(可再拖入更多)— 按「開始製譜」` : DROP_HINT;
   renderQueue();
   updateControls();
 };
@@ -248,16 +284,16 @@ async function submitJob(item) {
   currentJob = item;
   item.status = 'active'; item.progress = 1; item.stage = '準備中'; item.error = '';
   renderRow(item);
-  const f = item.file;
+  const f = item.file;   // pair:f = 鼓 stem;單檔:f = 該檔
   const setStage = txt => { item.stage = txt; $('stage').textContent = `處理中 ${doneCount() + 1}/${queue.length} — ${item.name}:${txt}`; renderRow(item); };
   try {
     const isZip = /\.zip$/i.test(f.name);
     // 參數一律取自「本卡片」(加入時由上方預設值帶入,之後可個別調整)
     // 跳過開頭秒數:等同 Python 版 YouTube 網址的 t= 參數
     const startSec = Math.max(0, parseFloat(item.start) || 0);
-    // 曲名:卡片填了就用,留空 → 自動用檔名 / 譜包內曲名
+    // 曲名:卡片填了就用,留空 → 自動用檔名(pair 取去 stem 字尾的乾淨曲名)/ 譜包內曲名
     let title = (item.title || '').trim();
-    let isStem = !!item.stem;
+    let isStem = false;   // 跳過分離(鼓 stem 直跑):由 zip 內含鼓原軌、或 pair 兩道 stem 觸發
     let audioBuf, bgmBytes, bgmName, stemPass = null;   // 來源鼓原軌已是 Opus → 原 bytes 原封沿用
     if (isZip) {
       setStage('解析譜包 zip(找鼓原軌)');
@@ -283,7 +319,7 @@ async function submitJob(item) {
         isStem = true;                      // 鼓原軌直跑:跳過分離
         audioBuf = await stemEntry.async('arraybuffer');
         if (/\.opus$/i.test(stemEntry.name)) stemPass = audioBuf.slice(0);   // decodeAudioData 會 detach → 先留副本
-        log('info', `找到鼓原軌:${stemEntry.name}(${(audioBuf.byteLength/1048576).toFixed(1)} MB)→ 跳過分離`);
+        log('info', `找到鼓原軌:${stemEntry.name}(${mb(audioBuf.byteLength)})→ 跳過分離`);
         setStage('使用譜包內鼓原軌(跳過分離)');
       } else if (bgmEntry) {
         audioBuf = await bgmEntry.async('arraybuffer');
@@ -292,13 +328,27 @@ async function submitJob(item) {
       } else throw new Error('zip 內找不到鼓原軌或 BGM');
       if (bgmEntry) { bgmBytes = await bgmEntry.async('arraybuffer'); bgmName = 'bgm.' + bgmEntry.name.split('.').pop().toLowerCase(); }
       else { bgmBytes = audioBuf.slice(0); bgmName = 'bgm.' + stemEntry.name.split('.').pop().toLowerCase(); }
+    } else if (item.pair) {
+      // 兩道已分離 stem:鼓 stem 供轉譜/keysound/鼓原軌,去鼓 BGM stem 供伴奏。
+      // demucs stem 本是兩道 → 跳過分離須兩道同時提供,BGM 才是真正的去鼓伴奏
+      //(而非把鼓軌本身誤當 BGM,那會與玩家 keysound 疊音、且完全沒有旋律/貝斯/人聲)。
+      isStem = true;
+      const bgmF = item.bgmFile;
+      const drumsBuf = await f.arrayBuffer();
+      bgmBytes = await bgmF.arrayBuffer();
+      bgmName = 'bgm.' + (bgmF.name.split('.').pop() || 'opus').toLowerCase();
+      if (/\.opus$/i.test(f.name)) stemPass = drumsBuf.slice(0);   // decodeAudioData 會 detach → 先留副本
+      audioBuf = drumsBuf;
+      log('info', `兩道 stem:鼓軌 ${f.name}(${mb(drumsBuf.byteLength)})· 去鼓 BGM ${bgmF.name}(${mb(bgmBytes.byteLength)})→ 跳過分離`);
+      setStage('使用已分離的兩道 stem(跳過分離)');
     } else {
+      // 單一混音檔:走完整分離(demucs),BGM 由 worker 從去鼓伴奏重編。
+      // 不再有「純鼓軌」單檔捷徑:單一鼓軌缺伴奏,舊設計只能把鼓軌本身誤當 BGM(疊音 bug)。
       audioBuf = await f.arrayBuffer();
-      bgmBytes = audioBuf.slice(0);
+      bgmBytes = audioBuf.slice(0);   // 分離路徑不採用(worker 產 BGM);僅供未走分離時兜底
       bgmName = 'bgm.' + (f.name.split('.').pop() || 'ogg').toLowerCase();
-      if (isStem && /\.opus$/i.test(f.name)) stemPass = audioBuf.slice(0);
     }
-    title = sanitize(title || f.name.replace(/\.[^.]+$/, ''));
+    title = sanitize(title || item.autoTitle);
     item.finalTitle = title;   // 解析後的實際曲名 → 卡片顯示
     renderRow(item);
 
@@ -360,7 +410,7 @@ async function finishJob(item, m) {
   try {
     setStage('打包譜包 zip(Opus 編碼鼓原軌)');
     const { title } = item.ctx;
-    // BGM:分離路徑用 worker 重編的去鼓伴奏;純鼓軌/回爐路徑沿用來源 BGM
+    // BGM:分離路徑用 worker 重編的去鼓伴奏;兩道 stem/回爐路徑沿用來源去鼓 BGM
     const bgmBytes = m.bgm ? m.bgm.bytes : item.ctx.bgmBytes;
     const bgmName = m.bgm ? m.bgm.name : item.ctx.bgmName;
     if (m.bgm) log('info', `BGM 使用去鼓伴奏:${bgmName}(${(bgmBytes.byteLength / 1048576).toFixed(1)} MB)`);
@@ -439,7 +489,14 @@ function buildRow(item) {
   head.className = 'qhead';
   const name = document.createElement('span');
   name.className = 'qname';
-  name.textContent = `${item.name}(${(item.file.size / 1048576).toFixed(1)} MB)`;
+  const totalSize = item.file.size + (item.bgmFile ? item.bgmFile.size : 0);
+  name.textContent = `${item.name}(${(totalSize / 1048576).toFixed(1)} MB)`;
+  head.append(name);
+  if (item.pair) {
+    const tag = document.createElement('span');
+    tag.className = 'qtag'; tag.textContent = '兩道 stem · 跳過分離';
+    head.append(tag);
+  }
   const badge = document.createElement('span');
   badge.className = 'qbadge';
   const dl = document.createElement('a');
@@ -447,9 +504,17 @@ function buildRow(item) {
   const x = document.createElement('button');
   x.className = 'qx'; x.title = '移除'; x.textContent = '✕';
   x.onclick = () => removeItem(item);
-  head.append(name, badge, dl, x);
+  head.append(badge, dl, x);
 
-  // 每列可調參數(曲名 / BPM 提示 / 跳秒 / 純鼓軌)— 等待中可編輯,其餘唯讀顯示
+  // pair:副標顯示配對到的鼓軌 / 去鼓 BGM 兩檔實際檔名
+  let sub = null;
+  if (item.pair) {
+    sub = document.createElement('div');
+    sub.className = 'qsub';
+    sub.textContent = `鼓軌 ${item.file.name} ＋ 去鼓 BGM ${item.bgmFile.name}`;
+  }
+
+  // 每列可調參數(曲名 / BPM 提示 / 跳秒)— 等待中可編輯,其餘唯讀顯示
   const params = document.createElement('div');
   params.className = 'qparams';
   const mkText = (cls, ph, val, key) => {
@@ -458,17 +523,10 @@ function buildRow(item) {
     i.oninput = () => { item[key] = i.value; };
     return i;
   };
-  const titleStem = item.name.replace(/\.[^.]+$/, '');
-  const pTitle = mkText('qp-title', `曲名(留空=自動:${titleStem})`, item.title, 'title');
+  const pTitle = mkText('qp-title', `曲名(留空=自動:${item.autoTitle})`, item.title, 'title');
   const pBpm = mkText('qp-bpm', 'BPM', item.bpm, 'bpm');
   const pStart = mkText('qp-start', '跳秒', item.start, 'start');
-  const stemWrap = document.createElement('label');
-  stemWrap.className = 'qp-stemwrap';
-  const pStem = document.createElement('input');
-  pStem.type = 'checkbox'; pStem.className = 'qp-stem'; pStem.checked = !!item.stem;
-  pStem.onchange = () => { item.stem = pStem.checked; };
-  stemWrap.append(pStem, document.createTextNode('純鼓軌'));
-  params.append(pTitle, pBpm, pStart, stemWrap);
+  params.append(pTitle, pBpm, pStart);
 
   const bar = document.createElement('div');
   bar.className = 'qbar'; bar.style.display = 'none';
@@ -478,8 +536,10 @@ function buildRow(item) {
   stage.className = 'qstage';
   const err = document.createElement('div');
   err.className = 'qerr'; err.style.display = 'none';
-  row.append(head, params, bar, stage, err);
-  item.el = { row, badge, dl, x, params, pTitle, pBpm, pStart, pStem, bar, barI, stage, err };
+  row.append(head);
+  if (sub) row.append(sub);
+  row.append(params, bar, stage, err);
+  item.el = { row, badge, dl, x, params, pTitle, pBpm, pStart, bar, barI, stage, err };
   renderRow(item);
   return row;
 }
@@ -494,11 +554,10 @@ function renderRow(item) {
   el.x.style.display = item.status === 'pending' ? '' : 'none';
   // 參數:等待中可編輯;開始處理後鎖定並顯示實際採用值(曲名顯示解析後的實際曲名)
   const editable = item.status === 'pending';
-  el.pTitle.disabled = el.pBpm.disabled = el.pStart.disabled = el.pStem.disabled = !editable;
+  el.pTitle.disabled = el.pBpm.disabled = el.pStart.disabled = !editable;
   el.pTitle.value = editable ? (item.title || '') : (item.finalTitle || item.title || '');
   el.pBpm.value = item.bpm || '';
   el.pStart.value = item.start || '';
-  el.pStem.checked = !!item.stem;
   const active = item.status === 'active';
   el.bar.style.display = active ? '' : 'none';
   if (active) el.barI.style.width = (item.progress || 0) + '%';
@@ -520,9 +579,7 @@ function removeItem(item) {
   if (item.url) URL.revokeObjectURL(item.url);
   const i = queue.indexOf(item);
   if (i >= 0) queue.splice(i, 1);
-  drop.textContent = queue.length
-    ? `已選 ${queue.length} 檔(可再拖入更多)— 按「開始製譜」`
-    : '拖放或點擊選擇 — 可一次多選音檔或譜包 zip 回爐';
+  drop.textContent = queue.length ? `已選 ${queue.length} 列(可再拖入更多)— 按「開始製譜」` : DROP_HINT;
   renderQueue();
   updateControls();
 }

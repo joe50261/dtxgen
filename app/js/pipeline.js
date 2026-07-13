@@ -734,3 +734,80 @@ export function accompanimentFromStems(tracks, n) {
   }
   return { bgmL, bgmR };
 }
+
+// ═══════════ 已分離 stem 對:drums + 去鼓 BGM(跳過分離的正確輸入)═══════════
+// demucs(two-stems)輸出本是「兩道」:drums 與 no_drums(去鼓 BGM)。要跳過
+// 分離,兩道必須同時提供 —— 只給鼓軌會缺伴奏,系統只能誤把鼓軌本身當 BGM,
+// 導致成品 BGM 與玩家 keysound 的鼓聲疊音、且完全沒有旋律/貝斯/人聲。
+// 依檔名判別哪道是鼓:含 drum/drums、但非「去鼓」措辭者為鼓軌,另一道即去鼓 BGM。
+// 兩者皆像或皆不像鼓軌時無法分辨,回 null(交由呼叫端報錯)。回傳索引(drum/bgm
+// ∈ {0,1}),與檔案物件解耦,便於單元測試。
+// 「去鼓」措辭:no_drums / without_drums / minus_drums,以及
+// drum(less|free|removed|stripped|gone)。詞界以「非英數」界定(檔名分隔符 _ - . 空白
+// 皆算界),而非 \b —— 因 \b 把底線當成 word char,\bno 在 "…_no_drums" 反而不成立,
+// 且會讓曲名尾巴帶 "no" 的檔(Techno / Volcano / Piano / mono…)的 "…no_drums" 誤中
+// 排除,把真鼓軌判成非鼓、與另一道對調 → 成品 BGM 變成鼓軌(正是本次要修掉的疊音 bug)。
+const DEDRUMMED = /(?:^|[^a-z0-9])(?:no[_\-\s.]?drums?|without[_\-\s.]?drums?|minus[_\-\s.]?drums?|drums?[_\-\s.]?(?:less|free|remov\w*|strip\w*|gone))(?![a-z0-9])/i;
+// 正面「去鼓 BGM / 伴奏」措辭(no_drums 家族在 DEDRUMMED,此處是其餘正面詞):
+// bgm / bgm_d(本 app 與常見 demucs 包裝的去鼓 BGM 命名)/ instrumental / inst /
+// accompaniment / karaoke / off_vocal。詞界同 DEDRUMMED 以「非英數」界定。
+const BGM_TOKEN = String.raw`bgm(?:[_\-. ]?d)?|instrumental|inst|accomp\w*|karaoke|off[_\-. ]?vocals?`;
+const BGM_STEM = new RegExp(String.raw`(?:^|[^a-z0-9])(?:${BGM_TOKEN})(?![a-z0-9])`, 'i');
+// 單軌角色:'drum'(鼓 stem)| 'bgm'(去鼓/伴奏 stem)| 'unknown'(判不出)。
+// no_drums 家族本身含 "drums",故 DEDRUMMED 需先判(勝過 /drums?/);其餘正面
+// 去鼓 BGM 詞(bgm_d…)本身不含 "drums",故在 /drums?/ 之後補判 BGM_STEM。
+export function stemRole(name) {
+  if (DEDRUMMED.test(name)) return 'bgm';
+  if (/drums?/i.test(name)) return 'drum';
+  if (BGM_STEM.test(name)) return 'bgm';
+  return 'unknown';
+}
+// 兩檔配對:一個是鼓軌、另一個不是(去鼓 BGM 或判不出)→ 回鼓/BGM 索引;
+// 兩者皆鼓軌或皆非鼓軌則無法分辨,回 null(交由呼叫端報錯 / 不配對)。
+export function classifyStemPair(nameA, nameB) {
+  const a = stemRole(nameA) === 'drum', b = stemRole(nameB) === 'drum';
+  if (a && !b) return { drum: 0, bgm: 1 };
+  if (b && !a) return { drum: 1, bgm: 0 };
+  return null;
+}
+
+// stem 檔名 → 去副檔名 + 去 stem 字尾的乾淨曲名(保留大小寫,供顯示 / 預設曲名)。
+// 字尾涵蓋:no_drums 家族、drum(less|free|removed|stripped|gone),以及去鼓 BGM 詞
+// (BGM_TOKEN:bgm_d / bgm / instrumental…)—— 兩道 stem 去字尾後須落在「同一曲名」才配得起來。
+const STEM_SUFFIX = new RegExp(
+  String.raw`[_\-. ]*(?:no[_\-. ]?drums?|without[_\-. ]?drums?|minus[_\-. ]?drums?|drums?(?:[_\-. ]?(?:less|free|remov\w*|strip\w*|gone))?|${BGM_TOKEN})[_\-. ]*$`, 'i');
+export function cleanStemTitle(name) {
+  const noExt = name.replace(/\.[^.]+$/, '');
+  const b = noExt.replace(STEM_SUFFIX, '').replace(/[_\-. ]+$/, '');
+  return b || noExt;
+}
+// 同一首歌的兩道 stem 配對用 key(乾淨曲名小寫)—— song.drums / song.bgm_d → 同 key。
+export function stemBaseKey(name) { return cleanStemTitle(name).toLowerCase(); }
+
+// 把一批音檔檔名分組成「單檔」或「兩道 stem 對」(drum + 去鼓 BGM)。
+// 恰兩個且成對 → 直接一對(使用者刻意一起選,不要求同 key);批量則以同一 base key 的
+// 「鼓 + 去鼓」配對,其餘各自成列。回傳(以索引表示,與檔案物件解耦、便於測試):
+//   { kind:'single', i } | { kind:'pair', drum:i, bgm:j }
+export function groupStemNames(names) {
+  if (names.length === 2) {
+    const c = classifyStemPair(names[0], names[1]);
+    if (c) return [{ kind: 'pair', drum: c.drum, bgm: c.bgm }];
+  }
+  const role = names.map(stemRole), key = names.map(stemBaseKey);
+  const used = new Array(names.length).fill(false);
+  const pairOf = new Map();   // drumIndex -> bgmIndex
+  // 第一輪:先為每個鼓軌找同 key、未用的去鼓 BGM 配對 —— 兩輪制才不會讓「排在
+  // 鼓軌之前的 BGM」(如拖入順序 bgm_d 在 drums 前)被提早當成單檔而漏配。
+  for (let i = 0; i < names.length; i++) {
+    if (role[i] !== 'drum' || used[i]) continue;
+    for (let k = 0; k < names.length; k++)
+      if (k !== i && !used[k] && role[k] === 'bgm' && key[k] === key[i]) { used[i] = used[k] = true; pairOf.set(i, k); break; }
+  }
+  // 第二輪:依原順序輸出(鼓軌帶出其 pair;已被配走的 BGM 跳過;其餘各自成列)
+  const units = [];
+  for (let i = 0; i < names.length; i++) {
+    if (pairOf.has(i)) units.push({ kind: 'pair', drum: i, bgm: pairOf.get(i) });
+    else if (!used[i]) units.push({ kind: 'single', i });
+  }
+  return units;
+}

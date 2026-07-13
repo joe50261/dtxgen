@@ -13,7 +13,7 @@
     "serve": "npx --yes serve app -l 8080",
     "sync-vendor": "node scripts/sync-vendor.mjs",
     "check-model": "node scripts/check-model.mjs",
-    "test": "node tests/test_keysounds.mjs && node tests/test_stems.mjs && node tests/test_bgm.mjs && node tests/smoke.mjs",
+    "test": "node tests/test_keysounds.mjs && node tests/test_stems.mjs && node tests/test_stempair.mjs && node tests/test_bgm.mjs && node tests/smoke.mjs",
     "postinstall": "node scripts/sync-vendor.mjs"
   },
   "dependencies": {
