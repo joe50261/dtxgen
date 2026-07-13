@@ -734,3 +734,18 @@ export function accompanimentFromStems(tracks, n) {
   }
   return { bgmL, bgmR };
 }
+
+// ═══════════ 已分離 stem 對:drums + 去鼓 BGM(跳過分離的正確輸入)═══════════
+// demucs(two-stems)輸出本是「兩道」:drums 與 no_drums(去鼓 BGM)。要跳過
+// 分離,兩道必須同時提供 —— 只給鼓軌會缺伴奏,系統只能誤把鼓軌本身當 BGM,
+// 導致成品 BGM 與玩家 keysound 的鼓聲疊音、且完全沒有旋律/貝斯/人聲。
+// 依檔名判別哪道是鼓:含 drum/drums、但非 no_drums / drumless 者為鼓軌,
+// 另一道即去鼓 BGM。兩者皆像或皆不像鼓軌時無法分辨,回 null(交由呼叫端報錯)。
+// 回傳索引(drum/bgm ∈ {0,1}),與檔案物件解耦,便於單元測試。
+export function classifyStemPair(nameA, nameB) {
+  const isDrum = n => /drums?/i.test(n) && !/no[_\-\s]?drums?|drumless|minus[_\-\s]?drums?/i.test(n);
+  const a = isDrum(nameA), b = isDrum(nameB);
+  if (a && !b) return { drum: 0, bgm: 1 };
+  if (b && !a) return { drum: 1, bgm: 0 };
+  return null;
+}

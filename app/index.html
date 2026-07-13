@@ -31,11 +31,11 @@ button:disabled{opacity:.45;cursor:default}
 footer{color:var(--dim);font-size:.78rem;margin-top:2.5rem;border-top:1px solid var(--line);padding-top:.9rem}
 </style></head><body><div class="wrap">
 <h1>dtxgen <span style="color:var(--acc)">web</span></h1>
-<div class="sub">音檔 → DTXMania 譜包 — <b>純前端</b>:所有運算在你的瀏覽器內完成,檔案不離開這台電腦。BGM 自動去鼓(伴奏重編,不與你打的鼓聲疊音)。支援丟回舊譜包 zip 回爐重做(直接用包內無損鼓原軌,跳過分離)。</div>
+<div class="sub">音檔 → DTXMania 譜包 — <b>純前端</b>:所有運算在你的瀏覽器內完成,檔案不離開這台電腦。BGM 自動去鼓(伴奏重編,不與你打的鼓聲疊音)。要跳過分離請一次拖入<b>兩道 stem(鼓軌 + 去鼓 BGM)</b>;或丟回舊譜包 zip 回爐重做(直接用包內鼓原軌 + 去鼓 BGM)。</div>
 
 <div class="card">
-  <div class="drop" id="drop">拖放或點擊選擇 — 音檔(mp3 / ogg / wav / m4a / flac)或譜包 zip 回爐</div>
-  <input type="file" id="file" accept="audio/*,.mp3,.ogg,.wav,.m4a,.flac,.zip" style="display:none">
+  <div class="drop" id="drop">拖放或點擊選擇 — 一個混音檔(自動分離)、兩道 stem(鼓軌 + 去鼓 BGM,跳過分離)、或譜包 zip 回爐<br><span style="font-size:.8rem;opacity:.7">音檔:mp3 / ogg / wav / m4a / flac / opus</span></div>
+  <input type="file" id="file" accept="audio/*,.mp3,.ogg,.wav,.m4a,.flac,.opus,.zip" multiple style="display:none">
   <label>曲名(可留空:自動用檔名 / 譜包內曲名)</label>
   <input type="text" id="title">
   <div style="display:flex;gap:1rem;flex-wrap:wrap">
@@ -44,7 +44,6 @@ footer{color:var(--dim);font-size:.78rem;margin-top:2.5rem;border-top:1px solid 
     <div><label>跳過開頭秒數(可留空)</label>
     <input type="text" id="start" placeholder="例:33" inputmode="decimal" style="max-width:9rem"></div>
   </div>
-  <div class="chk"><input type="checkbox" id="stem"><span>輸入已是純鼓軌(跳過分離,快很多)</span></div>
   <button id="go" disabled>開始製譜</button>
   <div class="bar" id="barbox" style="display:none"><i id="bar"></i></div>
   <div class="st" id="stage"></div>

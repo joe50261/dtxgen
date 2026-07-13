@@ -1,8 +1,10 @@
 // main.js — UI:檔案解碼(主線程)→ Worker(pipeline)→ JSZip 譜包下載
 import { encodeOggOpus } from './oggopus.js';
 import { resample } from './dsp.js';
+import { classifyStemPair } from './pipeline.js';
 const $ = id => document.getElementById(id);
-let pickedFile = null;
+// pickedFiles:[混音檔] | [zip] | [鼓 stem, 去鼓 BGM stem](兩道 → 跳過分離)
+let pickedFiles = null;
 
 // ── logger:UI 面板 + console 同步;error 帶完整 stack;可下載 ──
 const logLines = [];
@@ -77,18 +79,43 @@ function encodeFlac(yL, yR, sr) {
 }
 
 const drop = $('drop');
+const mb = b => (b / 1048576).toFixed(1) + ' MB';
 drop.onclick = () => $('file').click();
 drop.ondragover = e => { e.preventDefault(); drop.classList.add('on'); };
 drop.ondragleave = () => drop.classList.remove('on');
 drop.ondrop = e => {
   e.preventDefault(); drop.classList.remove('on');
-  if (e.dataTransfer.files[0]) pick(e.dataTransfer.files[0]);
+  if (e.dataTransfer.files.length) pick(e.dataTransfer.files);
 };
-$('file').onchange = () => { if ($('file').files[0]) pick($('file').files[0]); };
-function pick(f) {
-  pickedFile = f;
-  log('info', `選擇檔案:${f.name}(${(f.size/1048576).toFixed(1)} MB, ${f.type || '未知型別'})`);
-  drop.textContent = `已選:${f.name}(${(f.size / 1048576).toFixed(1)} MB)`;
+$('file').onchange = () => { if ($('file').files.length) pick($('file').files); };
+// 一個混音檔 → 自動分離;兩道 stem(鼓軌 + 去鼓 BGM)→ 跳過分離;zip → 回爐
+function pick(fileList) {
+  const files = [...fileList].filter(Boolean);
+  if (!files.length) return;
+  const zip = files.find(f => /\.zip$/i.test(f.name));
+  if (zip) {
+    pickedFiles = [zip];
+    if (files.length > 1) log('warn', '同時選了 zip 與其他檔 — 只用 zip 回爐,其餘忽略');
+    drop.textContent = `已選譜包:${zip.name}(${mb(zip.size)})— 回爐重做`;
+  } else if (files.length === 1) {
+    pickedFiles = [files[0]];
+    drop.textContent = `已選混音檔:${files[0].name}(${mb(files[0].size)})— 將自動分離鼓軌`;
+  } else {
+    // 兩道(含以上)已分離 stem:依檔名判別 drums / 去鼓 BGM(demucs stem 本是兩道)
+    if (files.length > 2) log('warn', `選了 ${files.length} 檔 — stem 對只取前兩檔`);
+    const two = files.slice(0, 2);
+    const cls = classifyStemPair(two[0].name, two[1].name);
+    if (!cls) {
+      pickedFiles = null;
+      $('go').disabled = true;
+      drop.textContent = `無法判別哪個是鼓軌:${two[0].name} / ${two[1].name} — 鼓軌檔名需含「drums」`;
+      log('warn', `兩檔皆無法判別鼓軌(需一個含 drums、非 no_drums):${two.map(f => f.name).join(' / ')}`);
+      return;
+    }
+    pickedFiles = [two[cls.drum], two[cls.bgm]];   // [鼓 stem, 去鼓 BGM stem]
+    drop.textContent = `已選兩道 stem — 鼓軌:${pickedFiles[0].name} · 去鼓 BGM:${pickedFiles[1].name}(跳過分離)`;
+  }
+  log('info', `選擇:${pickedFiles.map(f => `${f.name}(${mb(f.size)})`).join(' + ')}`);
   $('go').disabled = false;
 }
 
@@ -113,20 +140,22 @@ worker.onmessage = ev => {
 };
 
 $('go').onclick = async () => {
-  if (!pickedFile) return;
+  if (!pickedFiles || !pickedFiles.length) return;
   $('go').disabled = true;
   $('err').textContent = ''; $('dl').innerHTML = '';
   $('barbox').style.display = 'block'; $('bar').style.width = '1%';
   try {
-    const isZip = /\.zip$/i.test(pickedFile.name);
+    const primary = pickedFiles[0];
+    const isZip = /\.zip$/i.test(primary.name);
+    const isPair = pickedFiles.length === 2;   // [鼓 stem, 去鼓 BGM stem] → 跳過分離
     // 跳過開頭秒數:等同 Python 版 YouTube 網址的 t= 參數
     const startSec = Math.max(0, parseFloat($('start').value) || 0);
-    let audioBuf, bgmBytes, bgmName, title = $('title').value.trim(), isStem = $('stem').checked;
+    let audioBuf, bgmBytes, bgmName, title = $('title').value.trim(), isStem = false;
     let stemPass = null;   // 來源鼓原軌已是 Opus → 原 bytes 原封沿用(重編只添世代損失)
     if (isZip) {
       $('stage').textContent = '解析譜包 zip(找鼓原軌)';
       log('info', '解析譜包 zip …');
-      const zip = await JSZip.loadAsync(await pickedFile.arrayBuffer());
+      const zip = await JSZip.loadAsync(await primary.arrayBuffer());
       let stemEntry = null, bgmEntry = null, dtxEntry = null, srcEntry = null;
       zip.forEach((path, entry) => {
         const n = path.toLowerCase();
@@ -156,13 +185,26 @@ $('go').onclick = async () => {
       } else throw new Error('zip 內找不到鼓原軌或 BGM');
       if (bgmEntry) { bgmBytes = await bgmEntry.async('arraybuffer'); bgmName = 'bgm.' + bgmEntry.name.split('.').pop().toLowerCase(); }
       else { bgmBytes = audioBuf.slice(0); bgmName = 'bgm.' + stemEntry.name.split('.').pop().toLowerCase(); }
+    } else if (isPair) {
+      // 兩道已分離 stem:鼓 stem 供轉譜/keysound/鼓原軌,去鼓 BGM stem 供伴奏。
+      // demucs stem 本是兩道 → 跳過分離須同時提供,BGM 才是真正的去鼓伴奏
+      // (而非把鼓軌本身誤當 BGM,那會與玩家 keysound 疊音、且無旋律)。
+      isStem = true;
+      const [drumF, bgmF] = pickedFiles;
+      const drumsBuf = await drumF.arrayBuffer();
+      bgmBytes = await bgmF.arrayBuffer();
+      bgmName = 'bgm.' + (bgmF.name.split('.').pop() || 'opus').toLowerCase();
+      if (/\.opus$/i.test(drumF.name)) stemPass = drumsBuf.slice(0);   // decodeAudioData 會 detach → 先留副本
+      audioBuf = drumsBuf;
+      log('info', `兩道 stem:鼓軌 ${drumF.name}(${(drumsBuf.byteLength/1048576).toFixed(1)} MB)· 去鼓 BGM ${bgmF.name}(${(bgmBytes.byteLength/1048576).toFixed(1)} MB)→ 跳過分離`);
+      $('stage').textContent = '使用已分離的兩道 stem(跳過分離)';
     } else {
-      audioBuf = await pickedFile.arrayBuffer();
-      bgmBytes = audioBuf.slice(0);
-      bgmName = 'bgm.' + (pickedFile.name.split('.').pop() || 'ogg').toLowerCase();
-      if (isStem && /\.opus$/i.test(pickedFile.name)) stemPass = audioBuf.slice(0);
+      // 單一混音檔:走完整分離(demucs),BGM 由 worker 從去鼓伴奏重編
+      audioBuf = await primary.arrayBuffer();
+      bgmBytes = audioBuf.slice(0);   // 分離路徑不採用(worker 產 BGM);僅供未走分離時兜底
+      bgmName = 'bgm.' + (primary.name.split('.').pop() || 'ogg').toLowerCase();
     }
-    title = sanitize(title || pickedFile.name.replace(/\.[^.]+$/, ''));
+    title = sanitize(title || primary.name.replace(/\.[^.]+$/, ''));
 
     $('stage').textContent = '解碼音訊';
     const tDec = performance.now();
@@ -218,7 +260,7 @@ $('go').onclick = async () => {
 async function finishJob(m) {
   $('stage').textContent = '打包譜包 zip(Opus 編碼鼓原軌)';
   const { title } = jobCtx;
-  // BGM:分離路徑用 worker 重編的去鼓伴奏;純鼓軌/回爐路徑沿用來源 BGM
+  // BGM:分離路徑用 worker 重編的去鼓伴奏;兩道 stem/回爐路徑沿用來源去鼓 BGM
   const bgmBytes = m.bgm ? m.bgm.bytes : jobCtx.bgmBytes;
   const bgmName = m.bgm ? m.bgm.name : jobCtx.bgmName;
   if (m.bgm) log('info', `BGM 使用去鼓伴奏:${bgmName}(${(bgmBytes.byteLength / 1048576).toFixed(1)} MB)`);

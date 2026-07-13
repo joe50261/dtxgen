@@ -143,7 +143,7 @@ onmessage = async (ev) => {
     const files = {};
     for (const lv of (levels || ['bsc', 'adv', 'ext', 'mstr'])) {
       const evLv = simplifyML(qevents, grid.bpm, lv, gbdt);
-      // 分離路徑:譜面引用 worker 重編的去鼓 BGM;純鼓軌/回爐:沿用來源 BGM 檔名
+      // 分離路徑:譜面引用 worker 重編的去鼓 BGM;兩道 stem/回爐:沿用來源去鼓 BGM 檔名
       const w = writeDtx(evLv, grid, bgm ? bgm.name : (bgmName || 'bgm.ogg'), title, lv, ksMap);
       charts[lv] = w;
       files[lv] = lv + '.dtx';
