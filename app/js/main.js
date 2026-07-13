@@ -105,6 +105,9 @@ function addFiles(fileList) {
     if (dup) { skipped++; continue; }
     queue.push({
       id: ++seq, file: f, name: f.name, status: 'pending',
+      // 每列參數:加入時以上方「預設值」帶入,之後可個別調整(曲名留空 → 自動用檔名/譜包內曲名)
+      title: '', bpm: $('bpm').value.trim(), start: $('start').value.trim(), stem: $('stem').checked,
+      finalTitle: '',   // 製譜時解析出的實際曲名(供卡片顯示)
       progress: 0, stage: '', error: '', url: null, dlName: '', summary: '', stats: '',
       ctx: null, el: null,
     });
@@ -249,11 +252,12 @@ async function submitJob(item) {
   const setStage = txt => { item.stage = txt; $('stage').textContent = `處理中 ${doneCount() + 1}/${queue.length} — ${item.name}:${txt}`; renderRow(item); };
   try {
     const isZip = /\.zip$/i.test(f.name);
-    // 跳過開頭秒數:等同 Python 版 YouTube 網址的 t= 參數(整批共用上方欄位)
-    const startSec = Math.max(0, parseFloat($('start').value) || 0);
-    // 曲名:僅單檔時套用上方欄位;多檔各自用檔名 / 譜包內曲名
-    let title = (queue.length === 1 ? $('title').value.trim() : '');
-    let isStem = $('stem').checked;
+    // 參數一律取自「本卡片」(加入時由上方預設值帶入,之後可個別調整)
+    // 跳過開頭秒數:等同 Python 版 YouTube 網址的 t= 參數
+    const startSec = Math.max(0, parseFloat(item.start) || 0);
+    // 曲名:卡片填了就用,留空 → 自動用檔名 / 譜包內曲名
+    let title = (item.title || '').trim();
+    let isStem = !!item.stem;
     let audioBuf, bgmBytes, bgmName, stemPass = null;   // 來源鼓原軌已是 Opus → 原 bytes 原封沿用
     if (isZip) {
       setStage('解析譜包 zip(找鼓原軌)');
@@ -295,6 +299,8 @@ async function submitJob(item) {
       if (isStem && /\.opus$/i.test(f.name)) stemPass = audioBuf.slice(0);
     }
     title = sanitize(title || f.name.replace(/\.[^.]+$/, ''));
+    item.finalTitle = title;   // 解析後的實際曲名 → 卡片顯示
+    renderRow(item);
 
     setStage('解碼音訊');
     const tDec = performance.now();
@@ -336,11 +342,11 @@ async function submitJob(item) {
 
     item.ctx = { title, bgmBytes, bgmName, stemPass };
     setStage('送入 pipeline');
-    log('info', `提交 pipeline:title=${title} stem=${isStem} bgm=${isStem ? bgmName : '(分離後去鼓重編)'} bpmHint=${parseFloat($('bpm').value) || '無'}`);
+    log('info', `提交 pipeline:title=${title} stem=${isStem} bgm=${isStem ? bgmName : '(分離後去鼓重編)'} bpmHint=${parseFloat(item.bpm) || '無'}`);
     inFlight = item;   // 自此刻起本件確實在 worker 內;收到 done/error 前歸 onerror 認領
     worker.postMessage({
       yL, yR, sr: 44100, isDrumsStem: isStem, title, bgmName,
-      bpmHint: parseFloat($('bpm').value) || null,
+      bpmHint: parseFloat(item.bpm) || null,
     }, [yL.buffer, yR.buffer]);
   } catch (e) {
     log('error', `前置處理失敗(${f.name}):${e && e.stack || e}`);
@@ -442,6 +448,28 @@ function buildRow(item) {
   x.className = 'qx'; x.title = '移除'; x.textContent = '✕';
   x.onclick = () => removeItem(item);
   head.append(name, badge, dl, x);
+
+  // 每列可調參數(曲名 / BPM 提示 / 跳秒 / 純鼓軌)— 等待中可編輯,其餘唯讀顯示
+  const params = document.createElement('div');
+  params.className = 'qparams';
+  const mkText = (cls, ph, val, key) => {
+    const i = document.createElement('input');
+    i.type = 'text'; i.className = cls; i.placeholder = ph; i.value = val || '';
+    i.oninput = () => { item[key] = i.value; };
+    return i;
+  };
+  const titleStem = item.name.replace(/\.[^.]+$/, '');
+  const pTitle = mkText('qp-title', `曲名(留空=自動:${titleStem})`, item.title, 'title');
+  const pBpm = mkText('qp-bpm', 'BPM', item.bpm, 'bpm');
+  const pStart = mkText('qp-start', '跳秒', item.start, 'start');
+  const stemWrap = document.createElement('label');
+  stemWrap.className = 'qp-stemwrap';
+  const pStem = document.createElement('input');
+  pStem.type = 'checkbox'; pStem.className = 'qp-stem'; pStem.checked = !!item.stem;
+  pStem.onchange = () => { item.stem = pStem.checked; };
+  stemWrap.append(pStem, document.createTextNode('純鼓軌'));
+  params.append(pTitle, pBpm, pStart, stemWrap);
+
   const bar = document.createElement('div');
   bar.className = 'qbar'; bar.style.display = 'none';
   const barI = document.createElement('i');
@@ -450,8 +478,8 @@ function buildRow(item) {
   stage.className = 'qstage';
   const err = document.createElement('div');
   err.className = 'qerr'; err.style.display = 'none';
-  row.append(head, bar, stage, err);
-  item.el = { row, badge, dl, x, bar, barI, stage, err };
+  row.append(head, params, bar, stage, err);
+  item.el = { row, badge, dl, x, params, pTitle, pBpm, pStart, pStem, bar, barI, stage, err };
   renderRow(item);
   return row;
 }
@@ -464,6 +492,13 @@ function renderRow(item) {
   el.badge.className = `qbadge ${item.status}`;
   el.badge.textContent = BADGE[item.status];
   el.x.style.display = item.status === 'pending' ? '' : 'none';
+  // 參數:等待中可編輯;開始處理後鎖定並顯示實際採用值(曲名顯示解析後的實際曲名)
+  const editable = item.status === 'pending';
+  el.pTitle.disabled = el.pBpm.disabled = el.pStart.disabled = el.pStem.disabled = !editable;
+  el.pTitle.value = editable ? (item.title || '') : (item.finalTitle || item.title || '');
+  el.pBpm.value = item.bpm || '';
+  el.pStart.value = item.start || '';
+  el.pStem.checked = !!item.stem;
   const active = item.status === 'active';
   el.bar.style.display = active ? '' : 'none';
   if (active) el.barI.style.width = (item.progress || 0) + '%';
