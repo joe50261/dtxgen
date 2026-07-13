@@ -23,6 +23,24 @@ A(eq(classifyStemPair('mix (drumless).mp3', 'mix.drums.mp3'), { drum: 1, bgm: 0 
 A(eq(classifyStemPair('bass.wav', 'drums.wav'), { drum: 1, bgm: 0 }), 'bass / drums');
 A(eq(classifyStemPair('DRUMS.OPUS', 'inst.opus'), { drum: 0, bgm: 1 }), '大小寫不敏感');
 
+// 回歸:曲名尾巴帶 "no" 的檔(Techno / Volcano / Piano / mono…)其 "…no_drums"
+// 不可誤中 no_drums 排除 —— 否則真鼓軌被判非鼓、與另一道對調,成品 BGM 變鼓軌
+// (正是本修正要杜絕的疊音 bug)。詞界 \b 是關鍵。
+A(eq(classifyStemPair('Volcano_drums.opus', 'Volcano_without_drums.opus'),
+     { drum: 0, bgm: 1 }), 'Volcano_drums 不被誤排除(無對調)');
+A(eq(classifyStemPair('Techno_drums.wav', 'Techno_no_drums.wav'),
+     { drum: 0, bgm: 1 }), 'Techno_drums / Techno_no_drums');
+A(eq(classifyStemPair('Piano_no_drums.flac', 'Piano_drums.flac'),
+     { drum: 1, bgm: 0 }), 'Piano_no_drums / Piano_drums');
+// 更多「去鼓」措辭:without / drum-free / drum_removed / minus_drums
+A(eq(classifyStemPair('song_drums.wav', 'song_without_drums.wav'),
+     { drum: 0, bgm: 1 }), 'without_drums 視為去鼓 BGM');
+A(eq(classifyStemPair('drum-free.opus', 'drums.opus'), { drum: 1, bgm: 0 }), 'drum-free 視為去鼓 BGM');
+A(eq(classifyStemPair('X.drum_removed.opus', 'X.drums.opus'), { drum: 1, bgm: 0 }), 'drum_removed 視為去鼓 BGM');
+A(eq(classifyStemPair('mix.drums.mp3', 'mix.minus_drums.mp3'), { drum: 0, bgm: 1 }), 'minus_drums 視為去鼓 BGM');
+// 詞界不可反向誤傷:drums_freestyle 仍是鼓軌(free 非獨立詞尾)
+A(eq(classifyStemPair('drums_freestyle.wav', 'no_drums.wav'), { drum: 0, bgm: 1 }), 'drums_freestyle 仍是鼓軌');
+
 // 無法判別 → null(由呼叫端報錯,不猜)
 A(classifyStemPair('stem1.opus', 'stem2.opus') === null, '皆不像鼓軌 → null');
 A(classifyStemPair('a.drums.opus', 'b.drums.opus') === null, '皆像鼓軌 → null');

@@ -739,11 +739,17 @@ export function accompanimentFromStems(tracks, n) {
 // demucs(two-stems)輸出本是「兩道」:drums 與 no_drums(去鼓 BGM)。要跳過
 // 分離,兩道必須同時提供 —— 只給鼓軌會缺伴奏,系統只能誤把鼓軌本身當 BGM,
 // 導致成品 BGM 與玩家 keysound 的鼓聲疊音、且完全沒有旋律/貝斯/人聲。
-// 依檔名判別哪道是鼓:含 drum/drums、但非 no_drums / drumless 者為鼓軌,
-// 另一道即去鼓 BGM。兩者皆像或皆不像鼓軌時無法分辨,回 null(交由呼叫端報錯)。
-// 回傳索引(drum/bgm ∈ {0,1}),與檔案物件解耦,便於單元測試。
+// 依檔名判別哪道是鼓:含 drum/drums、但非「去鼓」措辭者為鼓軌,另一道即去鼓 BGM。
+// 兩者皆像或皆不像鼓軌時無法分辨,回 null(交由呼叫端報錯)。回傳索引(drum/bgm
+// ∈ {0,1}),與檔案物件解耦,便於單元測試。
+// 「去鼓」措辭:no_drums / without_drums / minus_drums,以及
+// drum(less|free|removed|stripped|gone)。詞界以「非英數」界定(檔名分隔符 _ - . 空白
+// 皆算界),而非 \b —— 因 \b 把底線當成 word char,\bno 在 "…_no_drums" 反而不成立,
+// 且會讓曲名尾巴帶 "no" 的檔(Techno / Volcano / Piano / mono…)的 "…no_drums" 誤中
+// 排除,把真鼓軌判成非鼓、與另一道對調 → 成品 BGM 變成鼓軌(正是本次要修掉的疊音 bug)。
+const DEDRUMMED = /(?:^|[^a-z0-9])(?:no[_\-\s.]?drums?|without[_\-\s.]?drums?|minus[_\-\s.]?drums?|drums?[_\-\s.]?(?:less|free|remov\w*|strip\w*|gone))(?![a-z0-9])/i;
 export function classifyStemPair(nameA, nameB) {
-  const isDrum = n => /drums?/i.test(n) && !/no[_\-\s]?drums?|drumless|minus[_\-\s]?drums?/i.test(n);
+  const isDrum = n => /drums?/i.test(n) && !DEDRUMMED.test(n);
   const a = isDrum(nameA), b = isDrum(nameB);
   if (a && !b) return { drum: 0, bgm: 1 };
   if (b && !a) return { drum: 1, bgm: 0 };

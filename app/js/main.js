@@ -199,9 +199,11 @@ $('go').onclick = async () => {
       log('info', `兩道 stem:鼓軌 ${drumF.name}(${(drumsBuf.byteLength/1048576).toFixed(1)} MB)· 去鼓 BGM ${bgmF.name}(${(bgmBytes.byteLength/1048576).toFixed(1)} MB)→ 跳過分離`);
       $('stage').textContent = '使用已分離的兩道 stem(跳過分離)';
     } else {
-      // 單一混音檔:走完整分離(demucs),BGM 由 worker 從去鼓伴奏重編
+      // 單一混音檔:走完整分離(demucs),BGM 一律由 worker 從去鼓伴奏重編。
+      // 分離路徑 worker 必回 m.bgm,finishJob 不會讀 jobCtx.bgmBytes → 不留輸入副本
+      // (省一份可觀的記憶體;bgmName 仍留字串以備日誌/兜底)。
       audioBuf = await primary.arrayBuffer();
-      bgmBytes = audioBuf.slice(0);   // 分離路徑不採用(worker 產 BGM);僅供未走分離時兜底
+      bgmBytes = null;
       bgmName = 'bgm.' + (primary.name.split('.').pop() || 'ogg').toLowerCase();
     }
     title = sanitize(title || primary.name.replace(/\.[^.]+$/, ''));
