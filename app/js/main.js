@@ -83,6 +83,7 @@ let processing = false;       // 佇列驅動中(有工作在跑或排隊等跑)
 let stopRequested = false;    // 要求完成當前工作後暫停
 let currentJob = null;        // 目前這輪處理的 item(前置處理或送 worker 中)
 let inFlight = null;          // 已 postMessage 進 worker、正等 worker 回覆的 item
+let runDone = 0, runErr = 0;  // 本輪(這次「開始製譜」)的成功/失敗計數(完成/失敗列會留在佇列供重下,故不能用全佇列統計)
 
 const drop = $('drop');
 drop.onclick = () => $('file').click();
@@ -117,19 +118,31 @@ function addFiles(fileList) {
   updateControls();
 }
 
-const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+let worker;
+function spawnWorker() {
+  worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+  worker.onerror = onWorkerError;
+  worker.onmessage = onWorkerMessage;
+}
 
-worker.onerror = ev => {
+function onWorkerError(ev) {
   log('error', `worker 錯誤:${ev.message} @ ${ev.filename}:${ev.lineno}`);
-  // worker 層級的非預期崩潰(pipeline 內已 try/catch)。只結算「確實已送進 worker、
-  // 仍在等回覆」的那件 —— inFlight 於收到終結訊息(done/error)時即清空,故打包/
-  // 前置處理(主線程 await)期間的殘留 onerror 不會誤殺當前或下一件工作。
+  // onerror 多為致命崩潰:可復原的失敗 pipeline 內已 try/catch 轉成 {type:'error'} 訊息,
+  // 能走到這裡的通常是把 worker 打死的崩潰(OOM / WebGPU / 模組錯誤)。
+  // 只在確有在飛工作(inFlight active)時介入 —— inFlight 於收到終結訊息(done/error)
+  // 時即清空,故打包/下一件前置處理(主線程 await)期間的殘留 onerror 不會誤判。
+  // 介入時必須「重建 worker」:崩潰的 worker 可能已死,若把下一件送進去會永遠收不到
+  // 回覆而整批卡死;重建後下一件會重新載入模型(以一次重載換取不卡死)。
   if (inFlight && inFlight.status === 'active') {
     const j = inFlight; inFlight = null;
-    settleError(j, `worker 崩潰:${ev.message}`);
+    try { worker.terminate(); } catch {}
+    spawnWorker();
+    log('warn', 'worker 已重建 — 下一件將重新載入模型');
+    settleError(j, `worker 崩潰(已重建 worker):${ev.message}`);
   }
-};
-worker.onmessage = ev => {
+}
+
+function onWorkerMessage(ev) {
   const m = ev.data;
   if (m.type === 'log') { log(m.level || 'info', `[worker] ${m.msg}`); return; }
   if (!currentJob) return;   // 無在飛工作時忽略殘留訊息
@@ -145,7 +158,9 @@ worker.onmessage = ev => {
     inFlight = null;   // 終結訊息:接下來的打包在主線程 await,期間 onerror 不應誤判本件
     finishJob(currentJob, m);
   }
-};
+}
+
+spawnWorker();
 
 const doneCount = () => queue.filter(j => j.status === 'done' || j.status === 'error').length;
 
@@ -153,6 +168,7 @@ $('go').onclick = () => {
   if (processing) return;
   if (!queue.some(j => j.status === 'pending')) { log('warn', '佇列沒有待處理項目'); return; }
   processing = true; stopRequested = false;
+  runDone = 0; runErr = 0;   // 本輪計數歸零(不含前次已完成/失敗且留在佇列的列)
   $('err').textContent = '';
   $('barbox').style.display = 'block'; $('bar').style.width = '1%';
   updateControls();
@@ -200,20 +216,18 @@ function advance() {
     }
   }
   if (next) { submitJob(next); return; }
-  // 全部處理完
+  // 全部處理完 —— 用本輪計數(完成/失敗列會留在佇列供重下,不能用全佇列統計)
   processing = false;
-  const done = queue.filter(j => j.status === 'done').length;
-  const err = queue.filter(j => j.status === 'error').length;
-  $('stage').textContent = `全部完成 — 成功 ${done}${err ? ` · 失敗 ${err}` : ''}`;
+  $('stage').textContent = `全部完成 — 成功 ${runDone}${runErr ? ` · 失敗 ${runErr}` : ''}`;
   $('barbox').style.display = 'none';
-  log('info', `佇列處理完畢 — 成功 ${done} 失敗 ${err}`);
+  log('info', `佇列處理完畢 — 成功 ${runDone} 失敗 ${runErr}`);
   updateControls();
 }
 
 // 結算失敗:標記、記錄、續跑(冪等:已結算則不重複前進)
 function settleError(item, msg) {
   if (item.status === 'done' || item.status === 'error') return;
-  item.status = 'error'; item.error = msg; item.stage = '';
+  item.status = 'error'; item.error = msg; item.stage = ''; runErr++;
   releaseCtx(item);   // 釋放來源音訊位元組副本,勿隨失敗項留在佇列
   log('error', `失敗(${item.name}):${msg}`);
   renderRow(item);
@@ -385,7 +399,7 @@ async function finishJob(item, m) {
     const bpmTxt = m.bpmText || m.bpm;
     item.stats = Object.entries(m.stats).map(([k, v]) => `${k.toUpperCase()} ${v.notes}顆/DLV${v.dlevel}`).join(' · ');
     item.summary = `BPM ${bpmTxt} · 殘差 ${m.meanResid.toFixed(1)}ms · ${item.stats}`;
-    item.status = 'done'; item.progress = 100; item.stage = '';
+    item.status = 'done'; item.progress = 100; item.stage = ''; runDone++;
     log('info', `完成(${item.name}):BPM ${bpmTxt} · 殘差 ${m.meanResid.toFixed(1)}ms · ` +
         Object.entries(m.stats).map(([k, v]) => `${k}=${v.notes}顆/DLV${v.dlevel}`).join(' '));
     renderRow(item);
