@@ -29,27 +29,50 @@ button:disabled{opacity:.45;cursor:default}
 .dl a{display:inline-block;background:var(--good);color:#03271a;text-decoration:none;border-radius:.6rem;padding:.6rem 1.2rem;font-weight:700;margin-top:.8rem}
 .ghostbtn{background:var(--card2);color:var(--tx);border:1px solid var(--line);border-radius:.5rem;padding:.15rem .7rem;font-size:.78rem;cursor:pointer;margin-top:0;font-weight:400}
 footer{color:var(--dim);font-size:.78rem;margin-top:2.5rem;border-top:1px solid var(--line);padding-top:.9rem}
+.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-top:1rem}
+.row button{margin-top:0}
+.queue{margin-top:1rem;display:flex;flex-direction:column;gap:.5rem}
+.qrow{background:var(--card2);border:1px solid var(--line);border-radius:.6rem;padding:.55rem .7rem;display:flex;flex-direction:column;gap:.35rem}
+.qhead{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.qname{font-size:.85rem;font-weight:600;word-break:break-all;flex:1;min-width:8rem}
+.qbadge{font-size:.72rem;padding:.1rem .5rem;border-radius:.4rem;white-space:nowrap;font-weight:700}
+.qbadge.pending{background:#2a2f42;color:var(--dim)}
+.qbadge.active{background:#1e3350;color:var(--acc)}
+.qbadge.done{background:#0f3d2e;color:var(--good)}
+.qbadge.error{background:#3d1616;color:var(--bad)}
+.qbar{height:.3rem;background:#0b0d13;border-radius:.2rem;overflow:hidden}
+.qbar>i{display:block;height:100%;background:linear-gradient(90deg,var(--acc2),var(--acc));transition:width .4s}
+.qstage{color:var(--dim);font-size:.75rem;word-break:break-all}
+.qdl{color:var(--good);text-decoration:none;font-size:.8rem;font-weight:700;white-space:nowrap}
+.qdl:hover{text-decoration:underline}
+.qx{background:none;border:none;color:var(--dim);cursor:pointer;font-size:1rem;line-height:1;padding:0 .3rem;margin:0}
+.qx:hover{color:var(--bad)}
+.qerr{color:var(--bad);font-size:.75rem;word-break:break-all}
 </style></head><body><div class="wrap">
 <h1>dtxgen <span style="color:var(--acc)">web</span></h1>
-<div class="sub">音檔 → DTXMania 譜包 — <b>純前端</b>:所有運算在你的瀏覽器內完成,檔案不離開這台電腦。BGM 自動去鼓(伴奏重編,不與你打的鼓聲疊音)。支援丟回舊譜包 zip 回爐重做(直接用包內無損鼓原軌,跳過分離)。</div>
+<div class="sub">音檔 → DTXMania 譜包 — <b>純前端</b>:所有運算在你的瀏覽器內完成,檔案不離開這台電腦。BGM 自動去鼓(伴奏重編,不與你打的鼓聲疊音)。支援丟回舊譜包 zip 回爐重做(直接用包內無損鼓原軌,跳過分離)。<b>可一次多選 / 批量導入</b>,多檔會排入佇列依序製譜。</div>
 
 <div class="card">
-  <div class="drop" id="drop">拖放或點擊選擇 — 音檔(mp3 / ogg / wav / m4a / flac)或譜包 zip 回爐</div>
-  <input type="file" id="file" accept="audio/*,.mp3,.ogg,.wav,.m4a,.flac,.zip" style="display:none">
-  <label>曲名(可留空:自動用檔名 / 譜包內曲名)</label>
+  <div class="drop" id="drop">拖放或點擊選擇 — 可一次<b>多選</b>音檔(mp3 / ogg / wav / m4a / flac)或譜包 zip 回爐;多檔會排入佇列依序製譜</div>
+  <input type="file" id="file" accept="audio/*,.mp3,.ogg,.wav,.m4a,.flac,.zip" multiple style="display:none">
+  <label>曲名(僅單檔時套用;多檔各自用檔名 / 譜包內曲名)</label>
   <input type="text" id="title">
   <div style="display:flex;gap:1rem;flex-wrap:wrap">
-    <div><label>BPM 提示(可留空)</label>
+    <div><label>BPM 提示(可留空,套用整批)</label>
     <input type="text" id="bpm" placeholder="例:176" inputmode="decimal" style="max-width:9rem"></div>
-    <div><label>跳過開頭秒數(可留空)</label>
+    <div><label>跳過開頭秒數(可留空,套用整批)</label>
     <input type="text" id="start" placeholder="例:33" inputmode="decimal" style="max-width:9rem"></div>
   </div>
-  <div class="chk"><input type="checkbox" id="stem"><span>輸入已是純鼓軌(跳過分離,快很多)</span></div>
-  <button id="go" disabled>開始製譜</button>
+  <div class="chk"><input type="checkbox" id="stem"><span>輸入已是純鼓軌(套用整批,跳過分離,快很多)</span></div>
+  <div class="row">
+    <button id="go" disabled>開始製譜</button>
+    <button id="stop" class="ghostbtn" style="display:none">停止(完成當前後)</button>
+    <button id="clearQ" class="ghostbtn" style="display:none">清空佇列</button>
+  </div>
   <div class="bar" id="barbox" style="display:none"><i id="bar"></i></div>
   <div class="st" id="stage"></div>
   <div class="err" id="err"></div>
-  <div class="dl" id="dl"></div>
+  <div class="queue" id="queue"></div>
 </div>
 
 <details class="card" id="logbox">
